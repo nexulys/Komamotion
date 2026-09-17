@@ -20,7 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { NexulysBadge } from "@/components/branding/nexulys-badge";
-import { PLANS } from "@/lib/stripe/plans";
+import { ALL_PLANS } from "@/lib/stripe/plans";
 
 const steps = [
   {
@@ -153,8 +153,8 @@ export default function Home() {
               1 second of generated video.
             </p>
           </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {PLANS.map((plan) => (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {ALL_PLANS.map((plan) => (
               <Card
                 key={plan.id}
                 className={

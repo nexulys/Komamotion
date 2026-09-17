@@ -13,13 +13,24 @@ export function SubscribeButton({
   planId,
   variant,
   currentPlan,
+  purchasable = true,
 }: {
   planId: string;
   variant: "brand" | "outline";
   currentPlan: string | undefined;
+  /** false for the free tier — it isn't a Stripe checkout target. */
+  purchasable?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
   const isCurrent = currentPlan === planId;
+
+  if (!purchasable) {
+    return (
+      <Button variant="outline" className="w-full" disabled>
+        {isCurrent ? "Current plan" : "Free tier"}
+      </Button>
+    );
+  }
 
   return (
     <Button

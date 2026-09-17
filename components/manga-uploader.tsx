@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 
 export interface MangaPanel {
   id: string;
+  /** Storage path in the private manga-sources bucket — what the server actually uses. */
+  path: string;
+  /** Short-lived signed URL for on-screen preview only. */
   url: string;
   name: string;
 }
@@ -19,6 +22,9 @@ interface MangaUploaderProps {
   onUpload: (files: File[]) => void | Promise<void>;
   onRemove?: (id: string) => void;
   isUploading?: boolean;
+  /** Batch mode: multiple panels can be checked at once for a shared render. */
+  multiSelect?: boolean;
+  selectedIds?: string[];
 }
 
 export function MangaUploader({
@@ -28,6 +34,8 @@ export function MangaUploader({
   onUpload,
   onRemove,
   isUploading = false,
+  multiSelect = false,
+  selectedIds = [],
 }: MangaUploaderProps) {
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -68,7 +76,7 @@ export function MangaUploader({
       {panels.length > 0 && (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
           {panels.map((panel) => {
-            const selected = panel.id === selectedId;
+            const selected = multiSelect ? selectedIds.includes(panel.id) : panel.id === selectedId;
             return (
               <motion.button
                 type="button"
