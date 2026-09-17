@@ -25,6 +25,7 @@ export default async function EditorPage({
       project={project}
       initialGenerations={generations}
       credits={profile?.credits_balance ?? 0}
+      userId={authUserId}
     />
   );
 }
