@@ -168,7 +168,16 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      deduct_user_credits: {
+        Args: { p_user_id: string; p_amount: number };
+        Returns: boolean;
+      };
+      add_user_credits: {
+        Args: { p_user_id: string; p_amount: number };
+        Returns: number | null;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

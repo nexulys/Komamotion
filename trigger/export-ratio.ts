@@ -1,7 +1,12 @@
 import { logger, task } from "@trigger.dev/sdk";
 import { cropToRatio } from "@/lib/media/ffmpeg";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { RENDERED_VIDEOS_BUCKET, buildStoragePath, uploadBufferToStorage } from "@/lib/supabase/signed-url";
+import {
+  RENDERED_VIDEOS_BUCKET,
+  buildStoragePath,
+  resolveMediaUrl,
+  uploadBufferToStorage,
+} from "@/lib/supabase/signed-url";
 
 /** Crops a completed render to a channel-specific aspect ratio (16:9 / 9:16 / 1:1) on demand. */
 export const exportRatioTask = task({
@@ -38,7 +43,9 @@ export const exportRatioTask = task({
     await admin.from("generation_exports").update({ status: "processing" }).eq("id", exportRow.id);
 
     try {
-      const buffer = await cropToRatio(generation.output_video_url, exportRow.ratio);
+      const sourceUrl = await resolveMediaUrl(RENDERED_VIDEOS_BUCKET, generation.output_video_url);
+      if (!sourceUrl) throw new Error("Could not resolve the rendered video for export");
+      const buffer = await cropToRatio(sourceUrl, exportRow.ratio);
       const path = buildStoragePath(
         generation.user_id,
         generation.project_id,

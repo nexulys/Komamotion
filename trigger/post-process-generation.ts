@@ -1,7 +1,12 @@
 import { logger, task } from "@trigger.dev/sdk";
 import { applyWatermark } from "@/lib/media/ffmpeg";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { RENDERED_VIDEOS_BUCKET, buildStoragePath, uploadBufferToStorage } from "@/lib/supabase/signed-url";
+import {
+  RENDERED_VIDEOS_BUCKET,
+  deleteFromStorage,
+  resolveMediaUrl,
+  uploadBufferToStorage,
+} from "@/lib/supabase/signed-url";
 import { planHasWatermark } from "@/lib/stripe/plans";
 
 /**
@@ -43,14 +48,23 @@ export const postProcessGenerationTask = task({
       return;
     }
 
-    const watermarkedBuffer = await applyWatermark(generation.output_video_url);
-    const path = buildStoragePath(generation.user_id, generation.project_id, "watermarked.mp4");
+    const sourceUrl = await resolveMediaUrl(RENDERED_VIDEOS_BUCKET, generation.output_video_url);
+    if (!sourceUrl) throw new Error("Could not resolve the rendered video for watermarking");
+
+    const watermarkedBuffer = await applyWatermark(sourceUrl);
+    const path = `${generation.user_id}/${generation.project_id}/${generation.id}-wm.mp4`;
     await uploadBufferToStorage(RENDERED_VIDEOS_BUCKET, path, watermarkedBuffer, "video/mp4");
 
     await admin
       .from("generations")
       .update({ output_video_url: path, watermarked: true, progress: 100 })
       .eq("id", generation.id);
+
+    // The unwatermarked original sits in the user's own folder, where the
+    // storage read policy would let them fetch it directly — remove it.
+    if (generation.output_video_url !== path && !/^https?:\/\//i.test(generation.output_video_url)) {
+      await deleteFromStorage(RENDERED_VIDEOS_BUCKET, [generation.output_video_url]);
+    }
 
     logger.info("Watermark applied", { generationId: generation.id });
   },

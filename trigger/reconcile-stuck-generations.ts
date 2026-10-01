@@ -36,28 +36,39 @@ export const reconcileStuckGenerationsTask = schedules.task({
 
     let resolved = 0;
     for (const generation of stuck) {
-      if (generation.updated_at < timeoutBefore) {
-        await finalizeGenerationFailed(generation.id, "Render timed out waiting on the AI provider", admin);
-        resolved++;
-        continue;
-      }
+      try {
+        if (generation.updated_at < timeoutBefore) {
+          await finalizeGenerationFailed(generation.id, "Render timed out waiting on the AI provider", admin);
+          resolved++;
+          continue;
+        }
 
-      const status = await getVideoGenerationStatus(
-        generation.provider as AiProvider,
-        generation.external_job_id!
-      );
-
-      if (status.status === "completed") {
-        await finalizeGenerationCompleted(
-          generation.id,
-          { videoUrl: status.videoUrl, thumbnailUrl: status.thumbnailUrl },
-          admin
+        const status = await getVideoGenerationStatus(
+          generation.provider as AiProvider,
+          generation.external_job_id!
         );
-        await postProcessGenerationTask.trigger({ generationId: generation.id });
-        resolved++;
-      } else if (status.status === "failed") {
-        await finalizeGenerationFailed(generation.id, status.error ?? "Generation failed", admin);
-        resolved++;
+
+        if (status.status === "completed") {
+          const { transitioned } = await finalizeGenerationCompleted(
+            generation.id,
+            { videoUrl: status.videoUrl, thumbnailUrl: status.thumbnailUrl },
+            admin
+          );
+          if (transitioned) {
+            await postProcessGenerationTask.trigger({ generationId: generation.id });
+          }
+          resolved++;
+        } else if (status.status === "failed") {
+          await finalizeGenerationFailed(generation.id, status.error ?? "Generation failed", admin);
+          resolved++;
+        }
+      } catch (err) {
+        // One failing item (e.g. a persistence download error) must not
+        // abort the pass for the rest; it gets retried on the next run.
+        logger.error("Reconciliation failed for generation", {
+          generationId: generation.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

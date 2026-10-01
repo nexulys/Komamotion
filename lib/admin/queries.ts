@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/lib/supabase/queries";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { PLANS } from "@/lib/stripe/plans";
+import { grantCredits } from "@/lib/generation/pipeline";
 
 /**
  * Every admin page/action calls this first. Reads happen through the
@@ -123,8 +124,18 @@ export async function setUserAdmin(userId: string, isAdmin: boolean) {
 
 export async function grantAdminCredits(userId: string, amount: number, description: string) {
   const admin = createServiceRoleClient();
-  const { data: user } = await admin.from("users").select("credits_balance").eq("id", userId).single();
-  if (!user) throw new Error("User not found");
+
+  if (amount > 0) {
+    await grantCredits(admin, { userId, amount, type: "admin_grant", description });
+    return;
+  }
+
+  const { data: ok, error } = await admin.rpc("deduct_user_credits", {
+    p_user_id: userId,
+    p_amount: -amount,
+  });
+  if (error) throw error;
+  if (!ok) throw new Error("Cannot remove more credits than the user has");
 
   await admin.from("credit_transactions").insert({
     user_id: userId,
@@ -132,5 +143,4 @@ export async function grantAdminCredits(userId: string, amount: number, descript
     type: "admin_grant",
     description,
   });
-  await admin.from("users").update({ credits_balance: user.credits_balance + amount }).eq("id", userId);
 }

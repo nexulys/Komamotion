@@ -80,12 +80,22 @@ export async function POST(request: Request) {
   const status = await getVideoGenerationStatus(generation.provider as AiProvider, externalJobId);
 
   if (status.status === "completed") {
-    await finalizeGenerationCompleted(
-      generation.id,
-      { videoUrl: status.videoUrl, thumbnailUrl: status.thumbnailUrl },
-      admin
-    );
-    await postProcessGenerationTask.trigger({ generationId: generation.id });
+    try {
+      const { transitioned } = await finalizeGenerationCompleted(
+        generation.id,
+        { videoUrl: status.videoUrl, thumbnailUrl: status.thumbnailUrl },
+        admin
+      );
+      if (transitioned) {
+        await postProcessGenerationTask.trigger({ generationId: generation.id });
+      }
+    } catch (err) {
+      // Mirroring the video into storage failed. The row is still
+      // "processing": a 5xx makes the provider redeliver, and the
+      // reconciliation cron retries regardless.
+      console.error("[webhooks/ai] could not persist render", generation.id, err);
+      return NextResponse.json({ error: "Could not persist render" }, { status: 500 });
+    }
   } else if (status.status === "failed") {
     await finalizeGenerationFailed(generation.id, status.error ?? "Generation failed", admin);
   } else {

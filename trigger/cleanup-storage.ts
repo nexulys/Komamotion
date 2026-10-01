@@ -48,13 +48,14 @@ async function getReferencedMangaSources(admin: ReturnType<typeof createServiceR
 
 async function getReferencedRenderedVideos(admin: ReturnType<typeof createServiceRoleClient>) {
   const [{ data: generationRows }, { data: exportRows }] = await Promise.all([
-    admin.from("generations").select("output_video_url, upscaled_video_url, audio_url"),
+    admin.from("generations").select("output_video_url, thumbnail_url, upscaled_video_url, audio_url"),
     admin.from("generation_exports").select("video_url"),
   ]);
 
   const referenced = new Set<string>();
   for (const row of generationRows ?? []) {
     if (row.output_video_url) referenced.add(row.output_video_url);
+    if (row.thumbnail_url) referenced.add(row.thumbnail_url);
     if (row.upscaled_video_url) referenced.add(row.upscaled_video_url);
     if (row.audio_url) referenced.add(row.audio_url);
   }
@@ -76,13 +77,15 @@ async function sweepBucket(
     limit: MAX_USER_FOLDERS_PER_RUN,
   });
 
+  // storage.list() returns folders with `id: null`; entries with an id are
+  // files, which never sit at the user/project levels of our path layout.
   for (const userFolder of userFolders ?? []) {
-    if (!userFolder.id) continue; // skip non-folder entries
+    if (userFolder.id) continue;
 
     const { data: projectFolders } = await admin.storage.from(bucket).list(userFolder.name, { limit: 500 });
 
     for (const projectFolder of projectFolders ?? []) {
-      if (!projectFolder.id) continue;
+      if (projectFolder.id) continue;
 
       const prefix = `${userFolder.name}/${projectFolder.name}`;
       const { data: files } = await admin.storage.from(bucket).list(prefix, { limit: 1000 });

@@ -2,7 +2,12 @@ import { logger, task } from "@trigger.dev/sdk";
 import { buildAudioPrompt, generateSceneAudio } from "@/lib/ai/audio";
 import { muxAudio } from "@/lib/media/ffmpeg";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { RENDERED_VIDEOS_BUCKET, buildStoragePath, uploadBufferToStorage } from "@/lib/supabase/signed-url";
+import {
+  RENDERED_VIDEOS_BUCKET,
+  buildStoragePath,
+  resolveMediaUrl,
+  uploadBufferToStorage,
+} from "@/lib/supabase/signed-url";
 import { refundCredits } from "@/lib/generation/pipeline";
 
 /**
@@ -40,7 +45,9 @@ export const generateAudioTask = task({
     const audioPath = buildStoragePath(generation.user_id, generation.project_id, "scene-audio.mp3");
     await uploadBufferToStorage(RENDERED_VIDEOS_BUCKET, audioPath, audioBuffer, "audio/mpeg");
 
-    const muxedBuffer = await muxAudio(generation.output_video_url, audioBuffer);
+    const sourceUrl = await resolveMediaUrl(RENDERED_VIDEOS_BUCKET, generation.output_video_url);
+    if (!sourceUrl) throw new Error("Could not resolve the rendered video for audio muxing");
+    const muxedBuffer = await muxAudio(sourceUrl, audioBuffer);
     const videoPath = buildStoragePath(generation.user_id, generation.project_id, "with-audio.mp4");
     await uploadBufferToStorage(RENDERED_VIDEOS_BUCKET, videoPath, muxedBuffer, "video/mp4");
 

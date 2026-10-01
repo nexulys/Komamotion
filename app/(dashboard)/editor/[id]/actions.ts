@@ -14,7 +14,13 @@ import {
   calculateUpscaleCreditsCost,
 } from "@/lib/stripe/credits";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
-import { finalizeGenerationCompleted, finalizeGenerationFailed, refundCredits } from "@/lib/generation/pipeline";
+import {
+  deductCredits,
+  finalizeGenerationCompleted,
+  finalizeGenerationFailed,
+  getCreditsBalance,
+  refundCredits,
+} from "@/lib/generation/pipeline";
 import { generateVideoTask } from "@/trigger/generate-video";
 import { postProcessGenerationTask } from "@/trigger/post-process-generation";
 import { upscaleGenerationTask } from "@/trigger/upscale-generation";
@@ -33,18 +39,10 @@ async function debitCredits(
   amount: number,
   description: string
 ): Promise<{ ok: boolean; balance: number }> {
-  const { data: user } = await admin.from("users").select("credits_balance").eq("id", userId).single();
-  const balance = user?.credits_balance ?? 0;
-  if (balance < amount) return { ok: false, balance };
-
-  await admin.from("users").update({ credits_balance: balance - amount }).eq("id", userId);
-  await admin.from("credit_transactions").insert({
-    user_id: userId,
-    amount: -amount,
-    type: "generation_debit",
-    description,
-  });
-  return { ok: true, balance: balance - amount };
+  const ok = await deductCredits(admin, { userId, amount, description });
+  if (ok) return { ok: true, balance: 0 };
+  // Only read back on failure, purely for the error message.
+  return { ok: false, balance: await getCreditsBalance(admin, userId) };
 }
 
 export async function getGeneration(generationId: string): Promise<GenerationRow | null> {
@@ -154,14 +152,22 @@ export async function refreshGenerationStatus(generationId: string): Promise<Act
   const admin = createServiceRoleClient();
 
   if (status.status === "completed") {
-    const updated = await finalizeGenerationCompleted(
-      generationId,
-      { videoUrl: status.videoUrl, thumbnailUrl: status.thumbnailUrl },
-      admin
-    );
-    await postProcessGenerationTask.trigger({ generationId });
-    revalidatePath(`/editor/${generation.project_id}`);
-    return { data: updated ?? generation };
+    try {
+      const { generation: updated, transitioned } = await finalizeGenerationCompleted(
+        generationId,
+        { videoUrl: status.videoUrl, thumbnailUrl: status.thumbnailUrl },
+        admin
+      );
+      if (transitioned) {
+        await postProcessGenerationTask.trigger({ generationId });
+      }
+      revalidatePath(`/editor/${generation.project_id}`);
+      return { data: updated ?? generation };
+    } catch {
+      // Persisting the render failed; it stays "processing" and the
+      // webhook retry / reconciliation cron will finish it.
+      return { data: generation };
+    }
   }
 
   if (status.status === "failed") {

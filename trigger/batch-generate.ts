@@ -3,6 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { calculateCreditsCost } from "@/lib/stripe/credits";
 import { getDefaultProvider } from "@/lib/ai";
 import { estimateGenerationCostUsd } from "@/lib/ai/costs";
+import { deductCredits, refundCredits } from "@/lib/generation/pipeline";
 import type { CameraMovement, Resolution } from "@/lib/supabase/types";
 import { generateVideoTask } from "@/trigger/generate-video";
 
@@ -54,13 +55,13 @@ export const batchGenerateTask = task({
     const createdIds: string[] = [];
 
     for (const sourceImagePath of payload.sourceImagePaths) {
-      const { data: user } = await admin
-        .from("users")
-        .select("credits_balance")
-        .eq("id", payload.userId)
-        .single();
+      const debited = await deductCredits(admin, {
+        userId: payload.userId,
+        amount: creditsPerItem,
+        description: `Batch render (${payload.batchId})`,
+      });
 
-      if (!user || user.credits_balance < creditsPerItem) {
+      if (!debited) {
         logger.warn("Batch stopped early: insufficient credits", {
           batchId: payload.batchId,
           completed: createdIds.length,
@@ -94,20 +95,13 @@ export const batchGenerateTask = task({
 
       if (error || !generation) {
         logger.error("Failed to create batch generation row", { error: error?.message });
+        await refundCredits(admin, {
+          userId: payload.userId,
+          amount: creditsPerItem,
+          description: `Refund — batch row could not be created (${payload.batchId})`,
+        });
         continue;
       }
-
-      await admin.from("credit_transactions").insert({
-        user_id: payload.userId,
-        amount: -creditsPerItem,
-        type: "generation_debit",
-        description: `Batch render (${payload.batchId})`,
-        generation_id: generation.id,
-      });
-      await admin
-        .from("users")
-        .update({ credits_balance: user.credits_balance - creditsPerItem })
-        .eq("id", payload.userId);
 
       createdIds.push(generation.id);
     }

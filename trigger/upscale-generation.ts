@@ -1,7 +1,12 @@
 import { logger, task, wait } from "@trigger.dev/sdk";
 import { getVideoUpscaleStatus, submitVideoUpscale } from "@/lib/ai/upscale";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { RENDERED_VIDEOS_BUCKET, buildStoragePath, uploadBufferToStorage } from "@/lib/supabase/signed-url";
+import {
+  RENDERED_VIDEOS_BUCKET,
+  buildStoragePath,
+  resolveMediaUrl,
+  uploadBufferToStorage,
+} from "@/lib/supabase/signed-url";
 import { refundCredits } from "@/lib/generation/pipeline";
 
 const MAX_POLLS = 40; // ~10 min ceiling at 15s intervals
@@ -29,8 +34,12 @@ export const upscaleGenerationTask = task({
       return;
     }
 
+    // Signed URL valid 2h — fal fetches the input as soon as the job starts.
+    const sourceUrl = await resolveMediaUrl(RENDERED_VIDEOS_BUCKET, generation.output_video_url);
+    if (!sourceUrl) throw new Error("Could not resolve the rendered video for upscaling");
+
     const { externalJobId } = await submitVideoUpscale({
-      videoUrl: generation.output_video_url,
+      videoUrl: sourceUrl,
       targetResolution: "4k",
     });
 

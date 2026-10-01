@@ -32,7 +32,7 @@ export async function deleteProject(projectId: string) {
   // missed here (e.g. a request that gets interrupted).
   const { data: generations } = await admin
     .from("generations")
-    .select("source_image_url, output_video_url, upscaled_video_url, audio_url")
+    .select("source_image_url, output_video_url, thumbnail_url, upscaled_video_url, audio_url")
     .eq("project_id", projectId)
     .eq("user_id", authUserId);
 
@@ -40,7 +40,7 @@ export async function deleteProject(projectId: string) {
     .map((g) => g.source_image_url)
     .filter((p): p is string => p != null && !p.startsWith("http"));
   const renderedPaths = (generations ?? [])
-    .flatMap((g) => [g.output_video_url, g.upscaled_video_url, g.audio_url])
+    .flatMap((g) => [g.output_video_url, g.thumbnail_url, g.upscaled_video_url, g.audio_url])
     .filter((p): p is string => p != null && !p.startsWith("http"));
 
   const { error } = await admin
