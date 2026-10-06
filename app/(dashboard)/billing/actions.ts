@@ -15,7 +15,7 @@ async function getOrigin() {
 export async function createCheckoutSession(planId: string) {
   const { authUserId, email } = await requireCurrentUser();
   const plan = getPlanById(planId);
-  if (!plan) throw new Error("Unknown plan");
+  if (!plan || !plan.stripePriceId) throw new Error("Unknown or non-purchasable plan");
 
   const customerId = await getOrCreateStripeCustomer({ userId: authUserId, email });
   const origin = await getOrigin();

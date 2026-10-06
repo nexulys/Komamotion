@@ -1,6 +1,6 @@
 "use client";
 
-import { Palette, Sparkles } from "lucide-react";
+import { Eraser, Palette, Sparkles } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
@@ -23,6 +23,7 @@ export interface AnimationSettingsValue {
   fps: number;
   resolution: Resolution;
   colorize: boolean;
+  removeText: boolean;
   durationSeconds: number;
 }
 
@@ -58,6 +59,7 @@ export function AnimationSettings({
     durationSeconds: value.durationSeconds,
     resolution: value.resolution,
     colorize: value.colorize,
+    removeText: value.removeText,
   });
 
   return (
@@ -173,6 +175,22 @@ export function AnimationSettings({
         <Switch
           checked={value.colorize}
           onCheckedChange={(v) => update("colorize", v)}
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/20 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Eraser className="size-4 text-primary" />
+          <div>
+            <p className="text-sm font-medium">Remove speech bubbles &amp; SFX text</p>
+            <p className="text-xs text-muted-foreground">
+              AI inpainting cleans dialogue balloons and sound effects before animating
+            </p>
+          </div>
+        </div>
+        <Switch
+          checked={value.removeText}
+          onCheckedChange={(v) => update("removeText", v)}
         />
       </div>
 

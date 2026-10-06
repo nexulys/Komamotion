@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe/server";
 import { getPlanByPriceId } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { addCreditsToBalance } from "@/lib/generation/pipeline";
 
 export const runtime = "nodejs";
 
@@ -21,13 +22,17 @@ async function grantCredits({
 }) {
   const admin = createServiceRoleClient();
 
-  const { error: insertError } = await admin.from("credit_transactions").insert({
-    user_id: userId,
-    amount,
-    type,
-    description,
-    stripe_event_id: eventId,
-  });
+  const { data: ledgerRow, error: insertError } = await admin
+    .from("credit_transactions")
+    .insert({
+      user_id: userId,
+      amount,
+      type,
+      description,
+      stripe_event_id: eventId,
+    })
+    .select("id")
+    .single();
 
   // Unique index on stripe_event_id makes this idempotent across webhook retries.
   if (insertError) {
@@ -35,17 +40,12 @@ async function grantCredits({
     throw insertError;
   }
 
-  const { data: user } = await admin
-    .from("users")
-    .select("credits_balance")
-    .eq("id", userId)
-    .single();
-
-  if (user) {
-    await admin
-      .from("users")
-      .update({ credits_balance: user.credits_balance + amount })
-      .eq("id", userId);
+  try {
+    await addCreditsToBalance(admin, userId, amount);
+  } catch (err) {
+    // Release the idempotency lock so Stripe's retry can grant the credits.
+    await admin.from("credit_transactions").delete().eq("id", ledgerRow.id);
+    throw err;
   }
 }
 

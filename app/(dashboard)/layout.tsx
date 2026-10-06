@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Coins, Film, FolderKanban } from "lucide-react";
+import { Coins, Film, FolderKanban, ShieldAlert } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/queries";
 import { Logo } from "@/components/branding/logo";
 import { NexulysBadge } from "@/components/branding/nexulys-badge";
@@ -41,6 +41,15 @@ export default async function DashboardLayout({
               {item.label}
             </Link>
           ))}
+          {current.profile?.is_admin && (
+            <Link
+              href="/admin"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+            >
+              <ShieldAlert className="size-4" />
+              Admin
+            </Link>
+          )}
         </nav>
         <div className="space-y-3 border-t border-border/60 p-4">
           <div className="flex items-center justify-between rounded-lg border border-border/60 bg-card px-3 py-2">

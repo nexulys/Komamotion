@@ -1,6 +1,6 @@
 import { Coins, Sparkles } from "lucide-react";
 import { requireCurrentUser, getCreditTransactions } from "@/lib/supabase/queries";
-import { PLANS, CREDIT_PACK } from "@/lib/stripe/plans";
+import { ALL_PLANS, CREDIT_PACK } from "@/lib/stripe/plans";
 import {
   Card,
   CardContent,
@@ -59,8 +59,8 @@ export default async function BillingPage() {
 
       <div>
         <h2 className="mb-4 text-lg font-medium">Plans</h2>
-        <div className="grid gap-6 md:grid-cols-3">
-          {PLANS.map((plan) => (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          {ALL_PLANS.map((plan) => (
             <Card key={plan.id} className={plan.highlighted ? "border-primary/60" : undefined}>
               <CardHeader>
                 {plan.highlighted && (
@@ -89,6 +89,7 @@ export default async function BillingPage() {
                   planId={plan.id}
                   variant={plan.highlighted ? "brand" : "outline"}
                   currentPlan={profile?.plan}
+                  purchasable={plan.stripePriceId !== null}
                 />
               </CardContent>
             </Card>
