@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import type { User } from "@supabase/supabase-js";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   MANGA_SOURCES_BUCKET,
   RENDERED_VIDEOS_BUCKET,
@@ -50,13 +51,39 @@ export async function getCurrentUser(): Promise<{
 
   if (!user) return null;
 
-  const { data: profile } = await supabase
+  const { data: existing } = await supabase
     .from("users")
     .select("*")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
-  return { authUserId: user.id, email: user.email ?? null, profile: profile ?? null };
+  const profile = existing ?? (await ensureUserProfile(user));
+
+  return { authUserId: user.id, email: user.email ?? null, profile };
+}
+
+/**
+ * The `on_auth_user_created` trigger normally creates the public.users row
+ * at signup, but accounts created before the trigger existed have none —
+ * and every project/generation row has a foreign key to it. Recreate it on
+ * first sight instead of letting the first insert crash.
+ */
+async function ensureUserProfile(user: User): Promise<UserRow | null> {
+  const admin = createServiceRoleClient();
+  const metadata = user.user_metadata ?? {};
+
+  await admin.from("users").upsert(
+    {
+      id: user.id,
+      email: user.email ?? "",
+      display_name: (metadata.full_name ?? metadata.name ?? null) as string | null,
+      avatar_url: (metadata.avatar_url ?? null) as string | null,
+    },
+    { onConflict: "id", ignoreDuplicates: true }
+  );
+
+  const { data } = await admin.from("users").select("*").eq("id", user.id).maybeSingle();
+  return data;
 }
 
 export async function requireCurrentUser() {
