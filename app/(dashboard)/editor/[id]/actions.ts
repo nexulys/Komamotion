@@ -15,12 +15,16 @@ import {
 } from "@/lib/stripe/credits";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import {
+  claimEnhancement,
   deductCredits,
+  failEnhancement,
   finalizeGenerationCompleted,
   finalizeGenerationFailed,
   getCreditsBalance,
   refundCredits,
+  releaseEnhancement,
 } from "@/lib/generation/pipeline";
+import { getEnhancementState, type EnhancementKind } from "@/lib/generation/enhancement-status";
 import { generateVideoTask } from "@/trigger/generate-video";
 import { postProcessGenerationTask } from "@/trigger/post-process-generation";
 import { upscaleGenerationTask } from "@/trigger/upscale-generation";
@@ -179,7 +183,37 @@ export async function refreshGenerationStatus(generationId: string): Promise<Act
   return { data: generation };
 }
 
-export async function requestUpscale(generationId: string): Promise<ActionResult<{ queued: true }>> {
+const ENHANCEMENTS = {
+  upscale: {
+    label: "4K upscale",
+    notReady: "Generation isn't ready to upscale yet.",
+    alreadyRunning: "A 4K upscale is already running for this render.",
+    notEnoughCredits: (cost: number) => `Not enough credits. Upscaling needs ${cost}.`,
+    creditsCost: calculateUpscaleCreditsCost,
+    task: upscaleGenerationTask,
+  },
+  audio: {
+    label: "AI sound",
+    notReady: "Generation isn't ready for audio yet.",
+    alreadyRunning: "AI sound is already being generated for this render.",
+    notEnoughCredits: (cost: number) => `Not enough credits. AI sound needs ${cost}.`,
+    creditsCost: calculateAudioCreditsCost,
+    task: generateAudioTask,
+  },
+} as const;
+
+/**
+ * Shared flow for the on-demand 4K upscale / AI sound jobs: claim the job on
+ * the generation row first (so a double click can't be charged twice), then
+ * debit, then queue. Every exit after the claim leaves the row and the
+ * balance consistent: refused debit → claim released; queueing failure →
+ * refund + status failed.
+ */
+async function requestEnhancement(
+  kind: EnhancementKind,
+  generationId: string
+): Promise<ActionResult<{ queued: true; creditsBalance: number }>> {
+  const config = ENHANCEMENTS[kind];
   const { authUserId } = await requireCurrentUser();
   try {
     await enforceRateLimit("aiUtility", authUserId);
@@ -197,50 +231,54 @@ export async function requestUpscale(generationId: string): Promise<ActionResult
     .single();
 
   if (!generation || generation.status !== "completed") {
-    return { error: "Generation isn't ready to upscale yet." };
+    return { error: config.notReady };
   }
 
-  const creditsCost = calculateUpscaleCreditsCost(generation.duration_seconds);
-  const debit = await debitCredits(admin, authUserId, creditsCost, `4K upscale for generation ${generationId}`);
-  if (!debit.ok) return { error: `Not enough credits. Upscaling needs ${creditsCost}.` };
+  const previous = getEnhancementState(generation, kind);
+  const claimed = await claimEnhancement(admin, { generationId, userId: authUserId, kind });
+  if (!claimed) return { error: config.alreadyRunning };
 
-  await upscaleGenerationTask.trigger({ generationId, creditsCost });
-  return { data: { queued: true } };
+  const creditsCost = config.creditsCost(generation.duration_seconds);
+  const debit = await debitCredits(admin, authUserId, creditsCost, `${config.label} for generation ${generationId}`);
+  if (!debit.ok) {
+    await releaseEnhancement(admin, { generationId, kind, previous });
+    return { error: config.notEnoughCredits(creditsCost) };
+  }
+
+  try {
+    await config.task.trigger({ generationId, creditsCost });
+  } catch (err) {
+    console.error(`[editor] could not queue ${kind}`, err);
+    await failEnhancement(admin, {
+      generationId,
+      userId: authUserId,
+      kind,
+      creditsCost,
+      description: `Refund — ${config.label} could not be queued`,
+    });
+    return { error: `Could not start the ${config.label}. Your credits were refunded.` };
+  }
+
+  return { data: { queued: true, creditsBalance: await getCreditsBalance(admin, authUserId) } };
 }
 
-export async function requestAudio(generationId: string): Promise<ActionResult<{ queued: true }>> {
+export async function requestUpscale(generationId: string) {
+  return requestEnhancement("upscale", generationId);
+}
+
+export async function requestAudio(generationId: string) {
+  return requestEnhancement("audio", generationId);
+}
+
+export async function getMyCreditsBalance(): Promise<number> {
   const { authUserId } = await requireCurrentUser();
-  try {
-    await enforceRateLimit("aiUtility", authUserId);
-  } catch (err) {
-    if (err instanceof RateLimitError) return { error: err.message };
-    throw err;
-  }
-
-  const admin = createServiceRoleClient();
-  const { data: generation } = await admin
-    .from("generations")
-    .select("*")
-    .eq("id", generationId)
-    .eq("user_id", authUserId)
-    .single();
-
-  if (!generation || generation.status !== "completed") {
-    return { error: "Generation isn't ready for audio yet." };
-  }
-
-  const creditsCost = calculateAudioCreditsCost(generation.duration_seconds);
-  const debit = await debitCredits(admin, authUserId, creditsCost, `AI sound for generation ${generationId}`);
-  if (!debit.ok) return { error: `Not enough credits. AI sound needs ${creditsCost}.` };
-
-  await generateAudioTask.trigger({ generationId, creditsCost });
-  return { data: { queued: true } };
+  return getCreditsBalance(createServiceRoleClient(), authUserId);
 }
 
 export async function requestExportRatio(
   generationId: string,
   ratio: ExportRatio
-): Promise<ActionResult<{ queued: true }>> {
+): Promise<ActionResult<{ queued: true; creditsBalance: number }>> {
   const { authUserId } = await requireCurrentUser();
   try {
     await enforceRateLimit("export", authUserId);
@@ -280,13 +318,13 @@ export async function requestExportRatio(
   }
 
   await exportRatioTask.trigger({ generationExportId: exportRow.id });
-  return { data: { queued: true } };
+  return { data: { queued: true, creditsBalance: await getCreditsBalance(admin, authUserId) } };
 }
 
 export async function requestPanelExtraction(
   projectId: string,
   sourcePagePath: string
-): Promise<ActionResult<{ panelExtractionId: string }>> {
+): Promise<ActionResult<{ panelExtractionId: string; creditsBalance: number }>> {
   const { authUserId } = await requireCurrentUser();
   try {
     await enforceRateLimit("aiUtility", authUserId);
@@ -312,7 +350,9 @@ export async function requestPanelExtraction(
   }
 
   await extractPanelsTask.trigger({ panelExtractionId: extraction.id });
-  return { data: { panelExtractionId: extraction.id } };
+  return {
+    data: { panelExtractionId: extraction.id, creditsBalance: await getCreditsBalance(admin, authUserId) },
+  };
 }
 
 export async function getPanelExtractionResult(panelExtractionId: string): Promise<{

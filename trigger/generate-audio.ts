@@ -8,7 +8,7 @@ import {
   resolveMediaUrl,
   uploadBufferToStorage,
 } from "@/lib/supabase/signed-url";
-import { refundCredits } from "@/lib/generation/pipeline";
+import { failEnhancement } from "@/lib/generation/pipeline";
 
 /**
  * On-demand ambient sound/SFX generation for a completed render
@@ -53,7 +53,7 @@ export const generateAudioTask = task({
 
     await admin
       .from("generations")
-      .update({ audio_url: audioPath, output_video_url: videoPath })
+      .update({ audio_url: audioPath, output_video_url: videoPath, audio_status: "completed" })
       .eq("id", generation.id);
 
     logger.info("Audio generated and muxed", { generationId: generation.id });
@@ -67,10 +67,11 @@ export const generateAudioTask = task({
       .single();
 
     if (generation) {
-      await refundCredits(admin, {
-        userId: generation.user_id,
-        amount: payload.creditsCost,
+      await failEnhancement(admin, {
         generationId: payload.generationId,
+        userId: generation.user_id,
+        kind: "audio",
+        creditsCost: payload.creditsCost,
         description: "Refund for failed audio generation",
       });
     }

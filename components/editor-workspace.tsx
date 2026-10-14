@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
   getGeneration,
   getGenerationExports,
+  getMyCreditsBalance,
   getPanelExtractionResult,
   requestAudio,
   requestExportRatio,
@@ -19,12 +20,23 @@ import { useRealtimeGenerations } from "@/hooks/use-realtime-generations";
 import { usePolling } from "@/hooks/use-polling";
 import type { MangaPanel } from "@/components/manga-uploader";
 import type { AnimationSettingsValue } from "@/components/animation-settings";
-import { DEFAULT_SETTINGS, RATIO_LABEL } from "@/components/editor/editor-constants";
+import {
+  DEFAULT_SETTINGS,
+  ENHANCEMENT_MESSAGES,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  RATIO_LABEL,
+} from "@/components/editor/editor-constants";
 import { EditorHeader } from "@/components/editor/editor-header";
 import { PanelImportCard } from "@/components/editor/panel-import-card";
 import { PreviewCard } from "@/components/editor/preview-card";
 import { RenderHistoryCard } from "@/components/editor/render-history-card";
 import { SettingsPanel } from "@/components/editor/settings-panel";
+import {
+  enhancementPatch,
+  getEnhancementState,
+  type EnhancementKind,
+} from "@/lib/generation/enhancement-status";
 import type { ExportRatio, GenerationExportRow, GenerationRow, ProjectRow } from "@/lib/supabase/types";
 
 export function EditorWorkspace({
@@ -67,10 +79,23 @@ export function EditorWorkspace({
       ? latestGeneration
       : null;
 
+  // What this tab already knows, so realtime updates only react to actual
+  // transitions — the same row is updated many times (progress, watermark,
+  // 4K, sound) and each update must not re-announce "ready".
+  const generationsRef = useRef(generations);
+  useEffect(() => {
+    generationsRef.current = generations;
+  }, [generations]);
+
+  const refreshCredits = useCallback(async () => {
+    setLocalCredits(await getMyCreditsBalance());
+  }, []);
+
   const handleRealtimeChange = useCallback(
     async (generationId: string) => {
       const generation = await getGeneration(generationId);
       if (!generation) return;
+      const previous = generationsRef.current.find((g) => g.id === generation.id);
 
       setGenerations((prev) => {
         const idx = prev.findIndex((g) => g.id === generation.id);
@@ -80,15 +105,35 @@ export function EditorWorkspace({
         return next;
       });
 
-      if (generation.status === "completed") {
-        toast.success("Your animation is ready!");
-        router.refresh();
-      } else if (generation.status === "failed") {
-        toast.error(generation.error_message ?? "Generation failed. Credits refunded.");
-        setLocalCredits((c) => c + generation.credits_cost);
+      if (generation.status !== previous?.status) {
+        if (generation.status === "completed") {
+          toast.success("Your animation is ready!");
+          router.refresh();
+        } else if (generation.status === "failed") {
+          toast.error(generation.error_message ?? "Generation failed. Credits refunded.");
+          if (previous) setLocalCredits((c) => c + generation.credits_cost);
+        }
+      }
+
+      if (!previous) {
+        // A row this tab hadn't seen (a batch item, or our own render whose
+        // event beat the action's response): its debit happened server-side,
+        // so re-read the balance rather than adjusting a local guess.
+        void refreshCredits();
+        return;
+      }
+      for (const kind of ["upscale", "audio"] as const) {
+        const status = getEnhancementState(generation, kind).status;
+        if (status === getEnhancementState(previous, kind).status) continue;
+        if (status === "completed") {
+          toast.success(ENHANCEMENT_MESSAGES[kind].completed);
+        } else if (status === "failed") {
+          toast.error(ENHANCEMENT_MESSAGES[kind].failed);
+          void refreshCredits();
+        }
       }
     },
-    [router]
+    [router, refreshCredits]
   );
 
   useRealtimeGenerations({ projectId: project.id, onChange: handleRealtimeChange });
@@ -158,8 +203,9 @@ export function EditorWorkspace({
         return;
       }
 
-      setGenerations((prev) => [generation, ...prev]);
-      setLocalCredits((c) => c - generation.credits_cost);
+      // Realtime may already have added this row if its event beat our response.
+      setGenerations((prev) => (prev.some((g) => g.id === generation.id) ? prev : [generation, ...prev]));
+      void refreshCredits();
       toast.info("Render started — this usually takes 30–90 seconds.");
     } finally {
       setIsSubmitting(false);
@@ -206,6 +252,7 @@ export function EditorWorkspace({
         setIsExtracting(false);
         return;
       }
+      setLocalCredits(data.creditsBalance);
 
       startPolling(async (stop) => {
         const result = await getPanelExtractionResult(data.panelExtractionId);
@@ -226,47 +273,46 @@ export function EditorWorkspace({
           setIsExtracting(false);
           toast.error(result.errorMessage ?? "Panel extraction failed.");
         }
-      }, 4000);
+      }, {
+        intervalMs: POLL_INTERVAL_MS,
+        timeoutMs: POLL_TIMEOUT_MS,
+        onTimeout: () => {
+          setIsExtracting(false);
+          toast.warning("Splitting this page is taking longer than expected. Please try again later.");
+        },
+      });
     } catch {
       setIsExtracting(false);
     }
   }
 
-  // On success the button stays disabled (credits are already debited) until
-  // realtime delivers the upscaled/audio row, which hides it altogether.
-  async function handleUpscale(generationId: string) {
-    const key = `upscale-${generationId}`;
+  async function handleEnhancement(kind: EnhancementKind, generationId: string) {
+    const key = `${kind}-${generationId}`;
     setPendingActions((p) => ({ ...p, [key]: true }));
-    const { error } = await requestUpscale(generationId);
-    if (error) {
-      toast.error(error);
-      setPendingActions((p) => ({ ...p, [key]: false }));
+    const { data, error } = await (kind === "upscale" ? requestUpscale : requestAudio)(generationId);
+    setPendingActions((p) => ({ ...p, [key]: false }));
+    if (error || !data) {
+      toast.error(error ?? "Could not start this job.");
       return;
     }
-    toast.info("4K upscale queued.");
-  }
-
-  async function handleAudio(generationId: string) {
-    const key = `audio-${generationId}`;
-    setPendingActions((p) => ({ ...p, [key]: true }));
-    const { error } = await requestAudio(generationId);
-    if (error) {
-      toast.error(error);
-      setPendingActions((p) => ({ ...p, [key]: false }));
-      return;
-    }
-    toast.info("AI sound design queued.");
+    setLocalCredits(data.creditsBalance);
+    // Mirror the server-side claim now so the button stays disabled; realtime
+    // then reports completion (button hidden) or failure (button back).
+    const patch = enhancementPatch(kind, "processing", new Date().toISOString());
+    setGenerations((prev) => prev.map((g) => (g.id === generationId ? { ...g, ...patch } : g)));
+    toast.info(ENHANCEMENT_MESSAGES[kind].queued);
   }
 
   async function handleExport(generationId: string, ratio: ExportRatio) {
     const key = `export-${generationId}-${ratio}`;
     setPendingActions((p) => ({ ...p, [key]: true }));
-    const { error } = await requestExportRatio(generationId, ratio);
-    if (error) {
-      toast.error(error);
+    const { data, error } = await requestExportRatio(generationId, ratio);
+    if (error || !data) {
+      toast.error(error ?? "Could not queue export.");
       setPendingActions((p) => ({ ...p, [key]: false }));
       return;
     }
+    setLocalCredits(data.creditsBalance);
     toast.info(`${RATIO_LABEL[ratio]} export queued.`);
 
     startPolling(async (stop) => {
@@ -277,7 +323,14 @@ export function EditorWorkspace({
         stop();
         setPendingActions((p) => ({ ...p, [key]: false }));
       }
-    }, 4000);
+    }, {
+      intervalMs: POLL_INTERVAL_MS,
+      timeoutMs: POLL_TIMEOUT_MS,
+      onTimeout: () => {
+        setPendingActions((p) => ({ ...p, [key]: false }));
+        toast.warning(`The ${RATIO_LABEL[ratio]} export is taking longer than expected. Reload the page later to download it.`);
+      },
+    });
   }
 
   const latestCompletedId = latestCompleted?.id;
@@ -318,8 +371,8 @@ export function EditorWorkspace({
           latestCompletedExports={latestCompleted ? exportsByGeneration[latestCompleted.id] ?? [] : []}
           selectedPanel={selectedPanel}
           pendingActions={pendingActions}
-          onUpscale={handleUpscale}
-          onAudio={handleAudio}
+          onUpscale={(generationId) => handleEnhancement("upscale", generationId)}
+          onAudio={(generationId) => handleEnhancement("audio", generationId)}
           onExport={handleExport}
         />
 

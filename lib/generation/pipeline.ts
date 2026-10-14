@@ -1,5 +1,11 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { RENDERED_VIDEOS_BUCKET, uploadBufferToStorage } from "@/lib/supabase/signed-url";
+import {
+  ENHANCEMENT_STALE_AFTER_MS,
+  enhancementPatch,
+  type EnhancementKind,
+  type EnhancementState,
+} from "@/lib/generation/enhancement-status";
 import type { CreditTransactionType, GenerationRow, GenerationStatus } from "@/lib/supabase/types";
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
@@ -85,6 +91,70 @@ export async function refundCredits(
 export async function getCreditsBalance(admin: ServiceClient, userId: string) {
   const { data } = await admin.from("users").select("credits_balance").eq("id", userId).single();
   return data?.credits_balance ?? 0;
+}
+
+// ============================================================
+// On-demand 4K upscale / AI sound jobs — status lives on the generation row
+// (migration 0005) so the editor sees failures live and after a reload.
+// ============================================================
+
+/**
+ * Marks the job as running in a single conditional update, so two clicks
+ * racing each other can't both get through (and both be charged). Fails
+ * only while a non-stale job is already running.
+ */
+export async function claimEnhancement(
+  admin: ServiceClient,
+  { generationId, userId, kind }: { generationId: string; userId: string; kind: EnhancementKind }
+): Promise<boolean> {
+  const now = Date.now();
+  const staleBefore = new Date(now - ENHANCEMENT_STALE_AFTER_MS).toISOString();
+  const { data, error } = await admin
+    .from("generations")
+    .update(enhancementPatch(kind, "processing", new Date(now).toISOString()))
+    .eq("id", generationId)
+    .eq("user_id", userId)
+    .or(
+      [
+        `${kind}_status.is.null`,
+        `${kind}_status.neq.processing`,
+        `${kind}_requested_at.is.null`,
+        `${kind}_requested_at.lt."${staleBefore}"`,
+      ].join(",")
+    )
+    .select("id");
+  if (error) throw error;
+  return data.length > 0;
+}
+
+/** Puts a job's status back as it was before `claimEnhancement` (the debit was refused). */
+export async function releaseEnhancement(
+  admin: ServiceClient,
+  {
+    generationId,
+    kind,
+    previous,
+  }: { generationId: string; kind: EnhancementKind; previous: EnhancementState }
+) {
+  await admin
+    .from("generations")
+    .update(enhancementPatch(kind, previous.status, previous.requestedAt))
+    .eq("id", generationId);
+}
+
+/** Refunds a job's credits, then flags it failed — in that order, so the editor reads the refunded balance when the status change reaches it. */
+export async function failEnhancement(
+  admin: ServiceClient,
+  {
+    generationId,
+    userId,
+    kind,
+    creditsCost,
+    description,
+  }: { generationId: string; userId: string; kind: EnhancementKind; creditsCost: number; description: string }
+) {
+  await refundCredits(admin, { userId, amount: creditsCost, generationId, description });
+  await admin.from("generations").update(enhancementPatch(kind, "failed")).eq("id", generationId);
 }
 
 // ============================================================

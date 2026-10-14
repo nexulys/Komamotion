@@ -3,6 +3,7 @@
 import { Download, Loader2, Volume2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EXPORT_RATIOS, RATIO_LABEL } from "@/components/editor/editor-constants";
+import { isEnhancementRunning } from "@/lib/generation/enhancement-status";
 import type { ExportRatio, GenerationExportRow, GenerationRow } from "@/lib/supabase/types";
 
 export function GenerationActions({
@@ -20,6 +21,10 @@ export function GenerationActions({
   onAudio: () => void;
   onExport: (ratio: ExportRatio) => void;
 }) {
+  // Busy while the click is in flight, then while the job runs server-side (survives reloads).
+  const upscaleBusy = pendingActions[`upscale-${generation.id}`] || isEnhancementRunning(generation, "upscale");
+  const audioBusy = pendingActions[`audio-${generation.id}`] || isEnhancementRunning(generation, "audio");
+
   return (
     <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/10 p-4">
       <div className="flex flex-wrap gap-2">
@@ -28,10 +33,10 @@ export function GenerationActions({
             type="button"
             size="sm"
             variant="outline"
-            disabled={pendingActions[`upscale-${generation.id}`]}
+            disabled={upscaleBusy}
             onClick={onUpscale}
           >
-            {pendingActions[`upscale-${generation.id}`] ? (
+            {upscaleBusy ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Wand2 className="size-4" />
@@ -44,10 +49,10 @@ export function GenerationActions({
             type="button"
             size="sm"
             variant="outline"
-            disabled={pendingActions[`audio-${generation.id}`]}
+            disabled={audioBusy}
             onClick={onAudio}
           >
-            {pendingActions[`audio-${generation.id}`] ? (
+            {audioBusy ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Volume2 className="size-4" />
