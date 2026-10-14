@@ -3,17 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Clapperboard,
-  Coins,
-  Download,
-  Layers,
-  Loader2,
-  Scissors,
-  Sparkles,
-  Volume2,
-  Wand2,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   getGeneration,
@@ -27,42 +16,15 @@ import {
   startGeneration,
 } from "@/app/(dashboard)/editor/[id]/actions";
 import { useRealtimeGenerations } from "@/hooks/use-realtime-generations";
-import { MangaUploader, type MangaPanel } from "@/components/manga-uploader";
-import { AnimationSettings, type AnimationSettingsValue } from "@/components/animation-settings";
-import { VideoPlayer } from "@/components/video-player";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
+import type { MangaPanel } from "@/components/manga-uploader";
+import type { AnimationSettingsValue } from "@/components/animation-settings";
+import { DEFAULT_SETTINGS, RATIO_LABEL } from "@/components/editor/editor-constants";
+import { EditorHeader } from "@/components/editor/editor-header";
+import { PanelImportCard } from "@/components/editor/panel-import-card";
+import { PreviewCard } from "@/components/editor/preview-card";
+import { RenderHistoryCard } from "@/components/editor/render-history-card";
+import { SettingsPanel } from "@/components/editor/settings-panel";
 import type { ExportRatio, GenerationExportRow, GenerationRow, ProjectRow } from "@/lib/supabase/types";
-
-const DEFAULT_SETTINGS: AnimationSettingsValue = {
-  prompt: "",
-  cameraMovement: "zoom_in",
-  motionIntensity: 0.5,
-  fps: 24,
-  resolution: "1080p",
-  colorize: false,
-  removeText: false,
-  durationSeconds: 4,
-};
-
-const STATUS_LABEL: Record<GenerationRow["status"], string> = {
-  pending: "Queued",
-  processing: "Rendering…",
-  completed: "Completed",
-  failed: "Failed",
-};
-
-const EXPORT_RATIOS: ExportRatio[] = ["16:9", "9:16", "1:1"];
-const RATIO_LABEL: Record<ExportRatio, string> = {
-  "16:9": "YouTube (16:9)",
-  "9:16": "TikTok / Reels (9:16)",
-  "1:1": "Instagram (1:1)",
-};
 
 export function EditorWorkspace({
   project,
@@ -98,7 +60,10 @@ export function EditorWorkspace({
   const selectedPanel = panels.find((p) => p.id === selectedPanelId) ?? null;
   const latestGeneration = generations[0] ?? null;
   const latestCompleted = generations.find((g) => g.status === "completed") ?? null;
-  const isRendering = latestGeneration && latestGeneration.status !== "completed" && latestGeneration.status !== "failed";
+  const renderingGeneration =
+    latestGeneration && latestGeneration.status !== "completed" && latestGeneration.status !== "failed"
+      ? latestGeneration
+      : null;
 
   const handleRealtimeChange = useCallback(
     async (generationId: string) => {
@@ -158,6 +123,11 @@ export function EditorWorkspace({
     setPanels((prev) => prev.filter((p) => p.id !== id));
     if (selectedPanelId === id) setSelectedPanelId(null);
     setSelectedPanelIds((prev) => prev.filter((p) => p !== id));
+  }
+
+  function handleBatchModeChange(enabled: boolean) {
+    setBatchMode(enabled);
+    setSelectedPanelIds([]);
   }
 
   function handlePanelSelect(id: string) {
@@ -304,265 +274,52 @@ export function EditorWorkspace({
     }
   }, [latestCompletedId]);
 
-  const progressValue = latestGeneration?.progress ?? 0;
-
   return (
     <div className="mx-auto grid max-w-7xl gap-8 px-6 py-8 lg:grid-cols-[1fr_380px]">
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{project.title}</h1>
-            <Badge variant="secondary" className="mt-1 capitalize">
-              {project.status}
-            </Badge>
-          </div>
-          <Badge variant="outline" className="gap-1.5">
-            <Coins className="size-3.5 text-primary" />
-            {localCredits.toLocaleString()} credits
-          </Badge>
-        </div>
+        <EditorHeader project={project} credits={localCredits} />
 
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">1. Import manga panels</CardTitle>
-            <div className="flex items-center gap-4">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!selectedPanel || isExtracting || batchMode}
-                onClick={handleExtractPanels}
-              >
-                {isExtracting ? <Loader2 className="size-4 animate-spin" /> : <Scissors className="size-4" />}
-                Split page into panels
-              </Button>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="batch-mode" className="text-xs text-muted-foreground">
-                  Batch mode
-                </Label>
-                <Switch
-                  id="batch-mode"
-                  checked={batchMode}
-                  onCheckedChange={(v) => {
-                    setBatchMode(v);
-                    setSelectedPanelIds([]);
-                  }}
-                />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <MangaUploader
-              panels={panels}
-              selectedId={selectedPanelId}
-              selectedIds={selectedPanelIds}
-              multiSelect={batchMode}
-              onSelect={handlePanelSelect}
-              onUpload={handleUpload}
-              onRemove={handleRemove}
-              isUploading={isUploading}
-            />
-            {batchMode && (
-              <div className="mt-4 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
-                <span className="flex items-center gap-2 text-sm">
-                  <Layers className="size-4 text-primary" />
-                  {selectedPanelIds.length} panel{selectedPanelIds.length === 1 ? "" : "s"} selected for a whole-chapter batch render
-                </span>
-                <Button size="sm" variant="brand" disabled={isSubmitting} onClick={handleBatchGenerate}>
-                  {isSubmitting && <Loader2 className="size-4 animate-spin" />}
-                  Generate batch
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <PanelImportCard
+          panels={panels}
+          selectedPanelId={selectedPanelId}
+          selectedPanelIds={selectedPanelIds}
+          hasSelectedPanel={!!selectedPanel}
+          batchMode={batchMode}
+          isUploading={isUploading}
+          isExtracting={isExtracting}
+          isSubmitting={isSubmitting}
+          onBatchModeChange={handleBatchModeChange}
+          onExtractPanels={handleExtractPanels}
+          onSelectPanel={handlePanelSelect}
+          onUpload={handleUpload}
+          onRemovePanel={handleRemove}
+          onBatchGenerate={handleBatchGenerate}
+        />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">2. Preview</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {isRendering ? (
-              <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/10 p-6 text-center">
-                <Loader2 className="mx-auto size-6 animate-spin text-primary" />
-                <p className="text-sm font-medium">{STATUS_LABEL[latestGeneration!.status]}</p>
-                <Progress value={progressValue} />
-              </div>
-            ) : latestCompleted?.output_video_url ? (
-              <>
-                <VideoPlayer
-                  src={latestCompleted.output_video_url}
-                  poster={latestCompleted.thumbnail_url}
-                  downloadFileName={`${project.title.replace(/\s+/g, "-").toLowerCase()}.mp4`}
-                />
-                <GenerationActions
-                  generation={latestCompleted}
-                  exports={exportsByGeneration[latestCompleted.id] ?? []}
-                  pendingActions={pendingActions}
-                  onUpscale={() => handleUpscale(latestCompleted.id)}
-                  onAudio={() => handleAudio(latestCompleted.id)}
-                  onExport={(ratio) => handleExport(latestCompleted.id, ratio)}
-                />
-              </>
-            ) : selectedPanel ? (
-              <div className="overflow-hidden rounded-xl border border-border/60">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={selectedPanel.url} alt="Selected panel" className="w-full object-contain" />
-              </div>
-            ) : (
-              <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-border/60 text-muted-foreground">
-                <Clapperboard className="size-8" />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <PreviewCard
+          projectTitle={project.title}
+          renderingGeneration={renderingGeneration}
+          latestCompleted={latestCompleted}
+          latestCompletedExports={latestCompleted ? exportsByGeneration[latestCompleted.id] ?? [] : []}
+          selectedPanel={selectedPanel}
+          pendingActions={pendingActions}
+          onUpscale={handleUpscale}
+          onAudio={handleAudio}
+          onExport={handleExport}
+        />
 
-        {generations.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Render history</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {generations.map((g) => (
-                <div key={g.id}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      {new Date(g.created_at).toLocaleString()} · {g.camera_movement.replace("_", " ")}
-                      {g.batch_id && " · batch"}
-                    </span>
-                    <Badge
-                      variant={
-                        g.status === "completed"
-                          ? "success"
-                          : g.status === "failed"
-                          ? "destructive"
-                          : "warning"
-                      }
-                    >
-                      {STATUS_LABEL[g.status]}
-                    </Badge>
-                  </div>
-                  <Separator className="mt-3" />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+        {generations.length > 0 && <RenderHistoryCard generations={generations} />}
       </div>
 
       <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">3. Animation settings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AnimationSettings value={settings} onChange={setSettings} disabled={isSubmitting} />
-          </CardContent>
-        </Card>
-
-        {!batchMode && (
-          <Button
-            size="lg"
-            variant="brand"
-            className="w-full"
-            disabled={!selectedPanel || isSubmitting}
-            onClick={handleGenerate}
-          >
-            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            Generate animation
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GenerationActions({
-  generation,
-  exports,
-  pendingActions,
-  onUpscale,
-  onAudio,
-  onExport,
-}: {
-  generation: GenerationRow;
-  exports: GenerationExportRow[];
-  pendingActions: Record<string, boolean>;
-  onUpscale: () => void;
-  onAudio: () => void;
-  onExport: (ratio: ExportRatio) => void;
-}) {
-  return (
-    <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/10 p-4">
-      <div className="flex flex-wrap gap-2">
-        {generation.resolution !== "4k" && !generation.upscaled_video_url && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pendingActions[`upscale-${generation.id}`]}
-            onClick={onUpscale}
-          >
-            {pendingActions[`upscale-${generation.id}`] ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Wand2 className="size-4" />
-            )}
-            Upscale to 4K
-          </Button>
-        )}
-        {!generation.audio_url && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pendingActions[`audio-${generation.id}`]}
-            onClick={onAudio}
-          >
-            {pendingActions[`audio-${generation.id}`] ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Volume2 className="size-4" />
-            )}
-            Add AI sound
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Export for other channels</p>
-        <div className="flex flex-wrap gap-2">
-          {EXPORT_RATIOS.map((ratio) => {
-            const existing = exports.find((e) => e.ratio === ratio);
-            const key = `export-${generation.id}-${ratio}`;
-            const isPending = pendingActions[key] || existing?.status === "pending" || existing?.status === "processing";
-
-            if (existing?.status === "completed" && existing.video_url) {
-              return (
-                <a key={ratio} href={existing.video_url} download target="_blank" rel="noreferrer">
-                  <Button type="button" size="sm" variant="secondary">
-                    <Download className="size-4" />
-                    {RATIO_LABEL[ratio]}
-                  </Button>
-                </a>
-              );
-            }
-
-            return (
-              <Button
-                key={ratio}
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={isPending}
-                onClick={() => onExport(ratio)}
-              >
-                {isPending && <Loader2 className="size-4 animate-spin" />}
-                {RATIO_LABEL[ratio]}
-              </Button>
-            );
-          })}
-        </div>
+        <SettingsPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          batchMode={batchMode}
+          hasSelectedPanel={!!selectedPanel}
+          isSubmitting={isSubmitting}
+          onGenerate={handleGenerate}
+        />
       </div>
     </div>
   );
