@@ -16,6 +16,7 @@ import {
   startGeneration,
 } from "@/app/(dashboard)/editor/[id]/actions";
 import { useRealtimeGenerations } from "@/hooks/use-realtime-generations";
+import { usePolling } from "@/hooks/use-polling";
 import type { MangaPanel } from "@/components/manga-uploader";
 import type { AnimationSettingsValue } from "@/components/animation-settings";
 import { DEFAULT_SETTINGS, RATIO_LABEL } from "@/components/editor/editor-constants";
@@ -39,6 +40,7 @@ export function EditorWorkspace({
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const startPolling = usePolling();
 
   const [panels, setPanels] = useState<MangaPanel[]>(
     initialGenerations
@@ -175,7 +177,7 @@ export function EditorWorkspace({
       const { data, error } = await startBatchGeneration({
         projectId: project.id,
         sourceImagePaths: paths,
-        settings: { ...settings, removeText: settings.removeText },
+        settings,
       });
 
       if (error || !data) {
@@ -201,14 +203,15 @@ export function EditorWorkspace({
       const { data, error } = await requestPanelExtraction(project.id, selectedPanel.path);
       if (error || !data) {
         toast.error(error ?? "Could not queue panel extraction.");
+        setIsExtracting(false);
         return;
       }
 
-      const poll = setInterval(async () => {
+      startPolling(async (stop) => {
         const result = await getPanelExtractionResult(data.panelExtractionId);
         if (!result) return;
         if (result.status === "completed") {
-          clearInterval(poll);
+          stop();
           setIsExtracting(false);
           const newPanels = result.panels.map((p) => ({
             id: crypto.randomUUID(),
@@ -219,7 +222,7 @@ export function EditorWorkspace({
           setPanels((prev) => [...newPanels, ...prev]);
           toast.success(`Split into ${newPanels.length} panels.`);
         } else if (result.status === "failed") {
-          clearInterval(poll);
+          stop();
           setIsExtracting(false);
           toast.error(result.errorMessage ?? "Panel extraction failed.");
         }
@@ -229,18 +232,30 @@ export function EditorWorkspace({
     }
   }
 
+  // On success the button stays disabled (credits are already debited) until
+  // realtime delivers the upscaled/audio row, which hides it altogether.
   async function handleUpscale(generationId: string) {
-    setPendingActions((p) => ({ ...p, [`upscale-${generationId}`]: true }));
+    const key = `upscale-${generationId}`;
+    setPendingActions((p) => ({ ...p, [key]: true }));
     const { error } = await requestUpscale(generationId);
-    if (error) toast.error(error);
-    else toast.info("4K upscale queued.");
+    if (error) {
+      toast.error(error);
+      setPendingActions((p) => ({ ...p, [key]: false }));
+      return;
+    }
+    toast.info("4K upscale queued.");
   }
 
   async function handleAudio(generationId: string) {
-    setPendingActions((p) => ({ ...p, [`audio-${generationId}`]: true }));
+    const key = `audio-${generationId}`;
+    setPendingActions((p) => ({ ...p, [key]: true }));
     const { error } = await requestAudio(generationId);
-    if (error) toast.error(error);
-    else toast.info("AI sound design queued.");
+    if (error) {
+      toast.error(error);
+      setPendingActions((p) => ({ ...p, [key]: false }));
+      return;
+    }
+    toast.info("AI sound design queued.");
   }
 
   async function handleExport(generationId: string, ratio: ExportRatio) {
@@ -254,12 +269,12 @@ export function EditorWorkspace({
     }
     toast.info(`${RATIO_LABEL[ratio]} export queued.`);
 
-    const poll = setInterval(async () => {
+    startPolling(async (stop) => {
       const rows = await getGenerationExports(generationId);
       setExportsByGeneration((prev) => ({ ...prev, [generationId]: rows }));
       const row = rows.find((r) => r.ratio === ratio);
       if (row?.status === "completed" || row?.status === "failed") {
-        clearInterval(poll);
+        stop();
         setPendingActions((p) => ({ ...p, [key]: false }));
       }
     }, 4000);
