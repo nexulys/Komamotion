@@ -9,10 +9,15 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 
 type Row = Record<string, unknown>;
-export type FakeDb = { tables: Record<string, Row[]>; log: { method: string; path: string; query: Record<string, string>; body: unknown }[] };
+export type FakeDb = {
+  tables: Record<string, Row[]>;
+  /** Columns with a unique index, per table — inserts that collide fail with Postgres code 23505. */
+  unique: Record<string, string[]>;
+  log: { method: string; path: string; query: Record<string, string>; body: unknown }[];
+};
 
 export function createFakeDb(): FakeDb {
-  return { tables: {}, log: [] };
+  return { tables: {}, unique: {}, log: [] };
 }
 
 function splitTop(s: string) {
@@ -147,6 +152,11 @@ export function createFakeClient(db: FakeDb) {
         created_at: new Date().toISOString(),
         ...b,
       }));
+      for (const col of db.unique[path] ?? []) {
+        if (items.some((item) => item[col] != null && table.some((r) => r[col] === item[col]))) {
+          return json(409, { code: "23505", message: `duplicate key value violates unique constraint on ${col}` });
+        }
+      }
       table.push(...items);
       return respond(items, 201);
     }

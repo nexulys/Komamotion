@@ -1,6 +1,8 @@
-import { Coins, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2, Coins, Sparkles, XCircle } from "lucide-react";
 import { requireCurrentUser, getCreditTransactions } from "@/lib/supabase/queries";
-import { ALL_PLANS, CREDIT_PACK } from "@/lib/stripe/plans";
+import { ALL_PLANS, CREDIT_PACK, getPlanById } from "@/lib/stripe/plans";
+import { isEntitledStatus } from "@/lib/stripe/subscription";
 import {
   Card,
   CardContent,
@@ -15,9 +17,17 @@ import {
   SubscribeButton,
 } from "@/components/billing-buttons";
 
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ checkout?: string }>;
+}) {
+  const { checkout } = await searchParams;
   const { authUserId, profile } = await requireCurrentUser();
   const transactions = await getCreditTransactions(authUserId);
+  const planName = getPlanById(profile?.plan)?.name ?? "Free";
+  const hasSubscription = Boolean(profile?.stripe_subscription_id) && isEntitledStatus(profile?.stripe_subscription_status);
+  const paymentIssue = profile?.stripe_subscription_status === "past_due" || profile?.stripe_subscription_status === "unpaid";
 
   return (
     <div className="mx-auto max-w-6xl space-y-10 px-6 py-10">
@@ -28,6 +38,20 @@ export default async function BillingPage() {
         </p>
       </div>
 
+      {checkout === "success" && (
+        <Notice icon={<CheckCircle2 className="size-4 text-emerald-400" />}>
+          Payment received — thank you! Your plan and credits update within a few seconds; refresh if they don&apos;t show yet.
+        </Notice>
+      )}
+      {checkout === "cancelled" && (
+        <Notice icon={<XCircle className="size-4 text-muted-foreground" />}>Checkout cancelled — nothing was charged.</Notice>
+      )}
+      {paymentIssue && (
+        <Notice icon={<AlertTriangle className="size-4 text-amber-400" />}>
+          Your last payment didn&apos;t go through. Update your card with &ldquo;Manage subscription&rdquo; to keep your plan.
+        </Notice>
+      )}
+
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <div>
@@ -36,7 +60,7 @@ export default async function BillingPage() {
               Current balance
             </CardTitle>
             <CardDescription>
-              Plan: <span className="capitalize text-foreground">{profile?.plan ?? "starter"}</span>
+              Plan: <span className="text-foreground">{planName}</span>
             </CardDescription>
           </div>
           <div className="flex items-center gap-3">
@@ -88,14 +112,22 @@ export default async function BillingPage() {
                 <SubscribeButton
                   planId={plan.id}
                   variant={plan.highlighted ? "brand" : "outline"}
-                  currentPlan={profile?.plan}
+                  currentPlan={profile?.plan ?? "free"}
                   purchasable={plan.stripePriceId !== null}
+                  hasSubscription={hasSubscription}
                 />
               </CardContent>
             </Card>
           ))}
         </div>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Subscriptions renew monthly until cancelled, and can be cancelled anytime from &ldquo;Manage subscription&rdquo;.
+        Credits you already have stay on your account. By subscribing you agree to our{" "}
+        <Link href="/terms" className="underline hover:text-foreground">Terms</Link> and{" "}
+        <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
+      </p>
 
       <div>
         <h2 className="mb-4 text-lg font-medium">Transaction history</h2>
@@ -125,6 +157,15 @@ export default async function BillingPage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function Notice({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-secondary/10 px-4 py-3 text-sm">
+      <span className="mt-0.5">{icon}</span>
+      <p>{children}</p>
     </div>
   );
 }
