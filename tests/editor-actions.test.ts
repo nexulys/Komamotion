@@ -51,7 +51,7 @@ vi.mock("@/trigger/export-ratio", () => ({ exportRatioTask: fakeTask("export-rat
 vi.mock("@/trigger/batch-generate", () => ({ batchGenerateTask: fakeTask("batch-generate") }));
 
 import * as actions from "@/app/(dashboard)/editor/[id]/actions";
-import { failExport, failEnhancement } from "@/lib/generation/pipeline";
+import { failExport, failEnhancement, refundOptionSurcharge } from "@/lib/generation/pipeline";
 import {
   calculateAudioCreditsCost,
   calculateCreditsCost,
@@ -70,9 +70,9 @@ const SETTINGS: AnimationSettingsValue = {
   resolution: "1080p",
   colorize: false,
   removeText: false,
-  durationSeconds: 4,
+  durationSeconds: 6,
 };
-const RENDER_COST = calculateCreditsCost({ durationSeconds: 4, resolution: "1080p", colorize: false, removeText: false });
+const RENDER_COST = calculateCreditsCost({ durationSeconds: 6, resolution: "1080p", colorize: false, removeText: false });
 const UPSCALE_COST = calculateUpscaleCreditsCost(4);
 const AUDIO_COST = calculateAudioCreditsCost(4);
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
@@ -153,6 +153,17 @@ describe("startGeneration", () => {
       expect(r.error).toMatch(/can't be used/);
     }
     expect(h.db.log).toEqual([]);
+  });
+
+  it("prices the normalized settings, not what the browser claims", async () => {
+    const r = await actions.startGeneration({
+      projectId: "p1",
+      sourceImagePath: "u1/p1/panel.png",
+      settings: { ...SETTINGS, durationSeconds: 0.1, fps: 1000 },
+    });
+    expect(r.data?.credits_cost).toBe(RENDER_COST);
+    expect([r.data?.duration_seconds, r.data?.fps]).toEqual([6, 50]);
+    expect(balance()).toBe(50 - RENDER_COST);
   });
 
   it("reports missing credits without creating anything", async () => {
@@ -285,5 +296,37 @@ describe("requestUpscale / requestAudio", () => {
     });
     expect(balance()).toBe(50 + AUDIO_COST);
     expect(writes(h.db)).toEqual(["POST rpc/add_user_credits", "POST credit_transactions", "PATCH generations"]);
+  });
+});
+
+// ---- optional pre-processing steps --------------------------------------------
+describe("refundOptionSurcharge", () => {
+  const generation = (over: Record<string, unknown>) => ({
+    id: "g1",
+    user_id: "u1",
+    duration_seconds: 6,
+    resolution: "1080p" as const,
+    colorize: true,
+    remove_text: true,
+    credits_cost: calculateCreditsCost({ durationSeconds: 6, resolution: "1080p", colorize: true, removeText: true }),
+    ...over,
+  });
+
+  it("refunds exactly what the failed option added and lowers credits_cost", async () => {
+    const g = generation({});
+    const withoutColor = calculateCreditsCost({ durationSeconds: 6, resolution: "1080p", colorize: false, removeText: true });
+    const left = await refundOptionSurcharge(h.client as never, g, "colorize");
+    expect(left).toEqual({ credits_cost: withoutColor, colorize: false, remove_text: true });
+    expect(balance()).toBe(50 + (g.credits_cost - withoutColor));
+    expect(gen().credits_cost).toBe(withoutColor);
+  });
+
+  it("stacks correctly when both options fail", async () => {
+    const g = generation({});
+    Object.assign(g, await refundOptionSurcharge(h.client as never, g, "removeText"));
+    Object.assign(g, await refundOptionSurcharge(h.client as never, g, "colorize"));
+    const plain = calculateCreditsCost({ durationSeconds: 6, resolution: "1080p", colorize: false, removeText: false });
+    expect(g.credits_cost).toBe(plain);
+    expect(balance()).toBe(50 + generation({}).credits_cost - plain);
   });
 });

@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS: AnimationSettingsValue = {
   resolution: "1080p",
   colorize: false,
   removeText: false,
-  durationSeconds: 4,
+  durationSeconds: 6,
 };
 
 export const STATUS_LABEL: Record<GenerationRow["status"], string> = {

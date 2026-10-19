@@ -1,10 +1,11 @@
 import { logger, task } from "@trigger.dev/sdk";
 import { createVideoGeneration } from "@/lib/ai";
 import { removeTextFromPanel } from "@/lib/ai/inpainting";
+import { colorizePanel } from "@/lib/ai/colorize";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { MANGA_SOURCES_BUCKET, createSignedUrl } from "@/lib/supabase/signed-url";
 import { getAiWebhookUrl } from "@/lib/env";
-import { finalizeGenerationFailed, setGenerationProgress } from "@/lib/generation/pipeline";
+import { finalizeGenerationFailed, refundOptionSurcharge, setGenerationProgress } from "@/lib/generation/pipeline";
 
 /**
  * Orchestrates one image-to-video render: optional text/bubble cleanup,
@@ -45,24 +46,42 @@ export const generateVideoTask = task({
     await setGenerationProgress(generation.id, 10, { status: "processing" }, admin);
 
     let imageUrl = await createSignedUrl(MANGA_SOURCES_BUCKET, generation.source_image_url);
+    // What the user is still charged for: an optional step that fails is
+    // dropped from it and its surcharge refunded.
+    const charged = { ...generation };
 
+    // Optional pre-processing. A failed step is non-fatal — the panel is
+    // animated without it and that option's surcharge is refunded — rather
+    // than failing the whole render over a cleanup step.
     if (generation.remove_text) {
       try {
         const { cleanedImageUrl, regionsRemoved } = await removeTextFromPanel(imageUrl);
         logger.info("Inpainting complete", { generationId: generation.id, regionsRemoved });
-        await admin
-          .from("generations")
-          .update({ cleaned_image_url: cleanedImageUrl })
-          .eq("id", generation.id);
         imageUrl = cleanedImageUrl;
       } catch (err) {
-        // Non-fatal: ship the animation from the original panel rather
-        // than failing the whole render over a cleanup step.
         logger.warn("Inpainting failed, continuing with original panel", {
           generationId: generation.id,
           error: err instanceof Error ? err.message : String(err),
         });
+        Object.assign(charged, await refundOptionSurcharge(admin, charged, "removeText"));
       }
+    }
+
+    if (generation.colorize) {
+      try {
+        imageUrl = await colorizePanel(imageUrl);
+        logger.info("Colorization complete", { generationId: generation.id });
+      } catch (err) {
+        logger.warn("Colorization failed, continuing in black and white", {
+          generationId: generation.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        Object.assign(charged, await refundOptionSurcharge(admin, charged, "colorize"));
+      }
+    }
+
+    if (generation.remove_text || generation.colorize) {
+      await admin.from("generations").update({ cleaned_image_url: imageUrl }).eq("id", generation.id);
     }
 
     await setGenerationProgress(generation.id, 30, {}, admin);

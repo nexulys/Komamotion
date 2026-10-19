@@ -27,6 +27,7 @@ import {
   releaseEnhancement,
 } from "@/lib/generation/pipeline";
 import { getEnhancementState, type EnhancementKind } from "@/lib/generation/enhancement-status";
+import { normalizeRenderSettings } from "@/lib/ai/render-options";
 import { generateVideoTask } from "@/trigger/generate-video";
 import { postProcessGenerationTask } from "@/trigger/post-process-generation";
 import { upscaleGenerationTask } from "@/trigger/upscale-generation";
@@ -74,7 +75,7 @@ export async function getGeneration(generationId: string): Promise<GenerationRow
 export async function startGeneration({
   projectId,
   sourceImagePath,
-  settings,
+  settings: requestedSettings,
 }: {
   projectId: string;
   sourceImagePath: string;
@@ -82,6 +83,8 @@ export async function startGeneration({
 }): Promise<ActionResult<GenerationRow>> {
   const { authUserId } = await requireCurrentUser();
   if (!isOwnSourcePath(sourceImagePath, authUserId)) return { error: NOT_YOUR_PANEL };
+  // Price and render only values the model accepts, whatever the browser sent.
+  const settings = normalizeRenderSettings(requestedSettings);
 
   try {
     await enforceRateLimit("generation", authUserId);
@@ -443,7 +446,7 @@ export async function getGenerationExports(generationId: string) {
 export async function startBatchGeneration({
   projectId,
   sourceImagePaths,
-  settings,
+  settings: requestedSettings,
 }: {
   projectId: string;
   sourceImagePaths: string[];
@@ -461,6 +464,7 @@ export async function startBatchGeneration({
   if (!sourceImagePaths.every((path) => isOwnSourcePath(path, authUserId))) return { error: NOT_YOUR_PANEL };
   if (!(await ownsProject(createServiceRoleClient(), projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
 
+  const settings = normalizeRenderSettings(requestedSettings);
   const batchId = crypto.randomUUID();
   try {
     // Credits are debited per panel inside the task, so a failure here costs nothing.

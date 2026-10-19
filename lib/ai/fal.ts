@@ -2,10 +2,11 @@ import { fal } from "@fal-ai/client";
 import { buildMotionPrompt } from "@/lib/ai/prompt";
 import type { AiJobHandle, AiJobStatus, ImageToVideoConnector, ImageToVideoParams } from "@/lib/ai/types";
 
-// LTX-Video image-to-video, served via fal.ai's queue API. Typed as a
-// widened `string` (not a literal) so we can pass the full set of
-// generation params — the exact accepted fields vary by model/version.
-const MODEL_ENDPOINT: string = "fal-ai/ltx-video/image-to-video";
+// LTX-2.3 (fast) image-to-video via fal.ai's queue API. Unlike the original
+// LTX-Video endpoint (which only takes an image + prompt), it honours the
+// editor's duration (6/8/10 s), fps and resolution (1080p or true 2160p) —
+// see lib/ai/render-options.ts for the values it accepts.
+const MODEL_ENDPOINT = "fal-ai/ltx-2.3/image-to-video/fast";
 
 let configured = false;
 function ensureConfigured() {
@@ -30,10 +31,12 @@ export const falConnector: ImageToVideoConnector = {
       input: {
         image_url: params.imageUrl,
         prompt,
-        num_frames: Math.round(params.durationSeconds * params.fps),
-        fps: params.fps,
-        motion_bucket_id: Math.round(params.motionIntensity * 255),
+        duration: String(params.durationSeconds) as "6" | "8" | "10",
+        fps: String(params.fps) as "24" | "25" | "48" | "50",
         resolution: params.resolution === "4k" ? "2160p" : "1080p",
+        aspect_ratio: "auto",
+        // Sound is the separate "Add AI sound" step, so renders stay silent.
+        generate_audio: false,
       },
       webhookUrl: params.webhookUrl,
     });
@@ -53,12 +56,7 @@ export const falConnector: ImageToVideoConnector = {
       const result = await fal.queue.result(MODEL_ENDPOINT, {
         requestId: externalJobId,
       });
-      const data = result.data as { video?: { url?: string }; thumbnail?: { url?: string } };
-      return {
-        status: "completed",
-        videoUrl: data.video?.url,
-        thumbnailUrl: data.thumbnail?.url,
-      };
+      return { status: "completed", videoUrl: result.data.video?.url };
     }
 
     if (status.status === "IN_PROGRESS") {

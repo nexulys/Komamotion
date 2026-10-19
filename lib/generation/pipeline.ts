@@ -6,6 +6,7 @@ import {
   type EnhancementKind,
   type EnhancementState,
 } from "@/lib/generation/enhancement-status";
+import { calculateCreditsCost } from "@/lib/stripe/credits";
 import type { CreditTransactionType, GenerationRow, GenerationStatus } from "@/lib/supabase/types";
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
@@ -314,6 +315,41 @@ export async function finalizeGenerationFailed(
   });
 
   return updated;
+}
+
+/**
+ * An optional pre-processing step (colorize / text removal) failed and the
+ * render goes ahead without it: refund what that option added to the price,
+ * and lower credits_cost so a later failure refund doesn't count it twice.
+ * `generation`'s colorize/remove_text flags mean "still charged for"; merge
+ * the returned patch back so a second failed option is priced correctly.
+ */
+export async function refundOptionSurcharge(
+  admin: ServiceClient,
+  generation: Pick<GenerationRow, "id" | "user_id" | "credits_cost" | "duration_seconds" | "resolution" | "colorize" | "remove_text">,
+  option: "colorize" | "removeText"
+): Promise<Pick<GenerationRow, "credits_cost" | "colorize" | "remove_text">> {
+  const charged = {
+    colorize: option === "colorize" ? false : generation.colorize,
+    remove_text: option === "removeText" ? false : generation.remove_text,
+  };
+  const without = calculateCreditsCost({
+    durationSeconds: generation.duration_seconds,
+    resolution: generation.resolution,
+    colorize: charged.colorize,
+    removeText: charged.remove_text,
+  });
+  const surcharge = generation.credits_cost - without;
+  if (surcharge <= 0) return { ...charged, credits_cost: generation.credits_cost };
+
+  await admin.from("generations").update({ credits_cost: without }).eq("id", generation.id);
+  await refundCredits(admin, {
+    userId: generation.user_id,
+    amount: surcharge,
+    generationId: generation.id,
+    description: option === "colorize" ? "Refund — colorization failed" : "Refund — text removal failed",
+  });
+  return { ...charged, credits_cost: without };
 }
 
 export async function setGenerationProgress(

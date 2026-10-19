@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { CameraMovement, Resolution } from "@/lib/supabase/types";
 import { calculateCreditsCost } from "@/lib/stripe/credits";
+import { VIDEO_DURATIONS, VIDEO_FPS } from "@/lib/ai/render-options";
 
 export interface AnimationSettingsValue {
   prompt: string;
@@ -37,7 +38,6 @@ const CAMERA_MOVEMENTS: { value: CameraMovement; label: string }[] = [
   { value: "orbit", label: "Orbit" },
 ];
 
-const FPS_OPTIONS = [12, 24, 30, 60];
 
 interface AnimationSettingsProps {
   value: AnimationSettingsValue;
@@ -111,19 +111,22 @@ export function AnimationSettings({
       </div>
 
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label>Duration</Label>
-          <span className="text-xs text-muted-foreground">
-            {value.durationSeconds}s
-          </span>
-        </div>
-        <Slider
-          value={[value.durationSeconds]}
-          min={2}
-          max={10}
-          step={1}
-          onValueChange={([v]) => update("durationSeconds", v)}
-        />
+        <Label>Duration</Label>
+        <Select
+          value={String(value.durationSeconds)}
+          onValueChange={(v) => update("durationSeconds", Number(v))}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {VIDEO_DURATIONS.map((seconds) => (
+              <SelectItem key={seconds} value={String(seconds)}>
+                {seconds} seconds
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -137,7 +140,7 @@ export function AnimationSettings({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FPS_OPTIONS.map((fps) => (
+              {VIDEO_FPS.map((fps) => (
                 <SelectItem key={fps} value={String(fps)}>
                   {fps} fps
                 </SelectItem>
