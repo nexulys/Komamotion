@@ -3,8 +3,10 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   MANGA_SOURCES_BUCKET,
   RENDERED_VIDEOS_BUCKET,
+  createSignedUrls,
   resolveMediaUrl,
 } from "@/lib/supabase/signed-url";
+import type { MangaPanel } from "@/components/manga-uploader";
 import { isGenerationFinalized } from "@/lib/generation/status";
 import type { GenerationRow, UserRow } from "@/lib/supabase/types";
 
@@ -145,6 +147,36 @@ export async function getProjectById(projectId: string, userId: string) {
 
   if (error) throw error;
   return data;
+}
+
+const PANEL_FILE = /\.(png|jpe?g|webp)$/i;
+const UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i;
+
+/**
+ * Every image in the project's storage folder — uploads and panels split
+ * out of a page — newest first, so the editor's panel strip survives a
+ * reload. Each panel carries its storage path (what actions need) and a
+ * short-lived signed URL (what the browser displays).
+ */
+export async function getProjectPanels(projectId: string, userId: string): Promise<MangaPanel[]> {
+  const admin = createServiceRoleClient();
+  const folder = `${userId}/${projectId}`;
+  const { data: files } = await admin.storage
+    .from(MANGA_SOURCES_BUCKET)
+    .list(folder, { limit: 200, sortBy: { column: "created_at", order: "desc" } });
+
+  const paths = (files ?? []).filter((f) => f.id && PANEL_FILE.test(f.name)).map((f) => `${folder}/${f.name}`);
+  if (paths.length === 0) return [];
+
+  const signed = await createSignedUrls(MANGA_SOURCES_BUCKET, paths);
+  return signed
+    .filter((s): s is typeof s & { path: string; signedUrl: string } => Boolean(s.path && s.signedUrl))
+    .map((s) => ({
+      id: s.path,
+      path: s.path,
+      url: s.signedUrl,
+      name: s.path.split("/").pop()!.replace(UUID_PREFIX, ""),
+    }));
 }
 
 export async function getCreditTransactions(userId: string, limit = 20) {

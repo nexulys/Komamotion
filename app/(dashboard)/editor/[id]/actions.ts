@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getGenerationById, requireCurrentUser } from "@/lib/supabase/queries";
-import { resolveMediaUrl, MANGA_SOURCES_BUCKET, RENDERED_VIDEOS_BUCKET } from "@/lib/supabase/signed-url";
+import { deleteFromStorage, resolveMediaUrl, MANGA_SOURCES_BUCKET, RENDERED_VIDEOS_BUCKET } from "@/lib/supabase/signed-url";
 import { getDefaultProvider, getVideoGenerationStatus } from "@/lib/ai";
 import { estimateGenerationCostUsd } from "@/lib/ai/costs";
 import {
@@ -301,6 +301,31 @@ export async function requestUpscale(generationId: string) {
 
 export async function requestAudio(generationId: string) {
   return requestEnhancement("audio", generationId);
+}
+
+/**
+ * Removes a panel image from the project's storage folder. Refused while a
+ * render that uses it hasn't started yet, since the job still needs to read it.
+ */
+export async function deletePanel(projectId: string, path: string): Promise<ActionResult<{ deleted: true }>> {
+  const { authUserId } = await requireCurrentUser();
+  if (!isOwnSourcePath(path, authUserId) || !path.startsWith(`${authUserId}/${projectId}/`)) {
+    return { error: NOT_YOUR_PANEL };
+  }
+
+  const admin = createServiceRoleClient();
+  const { data: inUse } = await admin
+    .from("generations")
+    .select("id")
+    .eq("source_image_url", path)
+    .in("status", ["pending", "processing"])
+    .limit(1);
+  if (inUse && inUse.length > 0) {
+    return { error: "This panel is being rendered — remove it once the render is done." };
+  }
+
+  await deleteFromStorage(MANGA_SOURCES_BUCKET, [path]);
+  return { data: { deleted: true } };
 }
 
 export async function getMyCreditsBalance(): Promise<number> {

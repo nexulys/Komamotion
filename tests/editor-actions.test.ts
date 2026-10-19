@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   triggerError: null as Error | null,
   triggered: [] as [string, unknown][],
   triggerOptions: [] as unknown[],
+  deleted: [] as string[],
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -27,6 +28,9 @@ vi.mock("@/lib/supabase/signed-url", () => ({
   MANGA_SOURCES_BUCKET: "manga-sources",
   RENDERED_VIDEOS_BUCKET: "rendered-videos",
   resolveMediaUrl: async (_bucket: string, value: string | null) => value,
+  deleteFromStorage: async (bucket: string, paths: string[]) => {
+    h.deleted.push(...paths.map((p) => `${bucket}/${p}`));
+  },
   uploadBufferToStorage: async (_bucket: string, path: string) => path,
 }));
 vi.mock("@/lib/ai", () => ({
@@ -85,6 +89,7 @@ function seed({ balance = 50, plan = "studio", generation = {} as Record<string,
   h.triggerError = null;
   h.triggered = [];
   h.triggerOptions = [];
+  h.deleted = [];
   h.db.tables = {
     users: [{ id: "u1", plan, credits_balance: balance }],
     projects: [
@@ -377,3 +382,25 @@ describe("refundOptionSurcharge", () => {
     expect(balance()).toBe(50 + generation({}).credits_cost - plain);
   });
 });
+
+// ---- panels ---------------------------------------------------------------------
+describe("deletePanel", () => {
+  it("removes the image from the project's folder", async () => {
+    expect(await actions.deletePanel("p1", "u1/p1/abc-panel.png")).toEqual({ data: { deleted: true } });
+    expect(h.deleted).toEqual(["manga-sources/u1/p1/abc-panel.png"]);
+  });
+
+  it("refuses paths outside this user's project", async () => {
+    for (const path of ["u2/p1/x.png", "u1/p9/x.png", "u1/p1/../../u2/x.png"]) {
+      expect((await actions.deletePanel("p1", path)).error).toMatch(/can't be used/);
+    }
+    expect(h.deleted).toEqual([]);
+  });
+
+  it("waits while a render still needs the image", async () => {
+    h.db.tables.generations.push({ id: "g2", user_id: "u1", project_id: "p1", status: "pending", source_image_url: "u1/p1/busy.png" });
+    expect((await actions.deletePanel("p1", "u1/p1/busy.png")).error).toMatch(/being rendered/);
+    expect(h.deleted).toEqual([]);
+  });
+});
+

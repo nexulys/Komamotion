@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
+  deletePanel,
   getGeneration,
   getGenerationExports,
   getMyCreditsBalance,
@@ -43,12 +44,15 @@ import type { ExportRatio, GenerationExportRow, GenerationRow, PlanId, ProjectRo
 export function EditorWorkspace({
   project,
   initialGenerations,
+  initialPanels,
   credits,
   userId,
   plan,
 }: {
   project: ProjectRow;
   initialGenerations: GenerationRow[];
+  /** The project's images from storage (uploads + split panels), newest first. */
+  initialPanels: MangaPanel[];
   credits: number;
   userId: string;
   plan: PlanId;
@@ -57,11 +61,7 @@ export function EditorWorkspace({
   const supabase = useMemo(() => createClient(), []);
   const startPolling = usePolling();
 
-  const [panels, setPanels] = useState<MangaPanel[]>(
-    initialGenerations
-      .map((g) => ({ id: g.id, path: g.source_image_url, url: g.source_image_url, name: "Uploaded panel" }))
-      .filter((p, idx, arr) => arr.findIndex((x) => x.path === p.path) === idx)
-  );
+  const [panels, setPanels] = useState<MangaPanel[]>(initialPanels);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(panels[0]?.id ?? null);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedPanelIds, setSelectedPanelIds] = useState<string[]>([]);
@@ -169,7 +169,14 @@ export function EditorWorkspace({
     }
   }
 
-  function handleRemove(id: string) {
+  async function handleRemove(id: string) {
+    const panel = panels.find((p) => p.id === id);
+    if (!panel) return;
+    const { error } = await deletePanel(project.id, panel.path);
+    if (error) {
+      toast.error(error);
+      return;
+    }
     setPanels((prev) => prev.filter((p) => p.id !== id));
     if (selectedPanelId === id) setSelectedPanelId(null);
     setSelectedPanelIds((prev) => prev.filter((p) => p !== id));
