@@ -54,6 +54,20 @@ supabase/
   migrations/       versioned SQL: schema, RLS, storage policies, Realtime
 ```
 
+## Going to production
+
+Step-by-step setup of every external service (Supabase auth/SMTP, fal.ai,
+Trigger.dev, Stripe, Upstash, legal identity) and where each environment
+variable goes: **[docs/MISE_EN_PRODUCTION.md](docs/MISE_EN_PRODUCTION.md)** (in French).
+
+## Checks
+
+```bash
+npm run typecheck && npm run lint && npm test && npm run build
+```
+
+CI runs the same on every pull request (`.github/workflows/ci.yml`).
+
 ## Getting started
 
 1. **Install dependencies**
