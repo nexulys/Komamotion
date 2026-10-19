@@ -7,7 +7,14 @@ import { safeNextPath } from "@/lib/safe-redirect";
 
 export type AuthActionState = {
   error?: string;
+  message?: string;
 } | null;
+
+/** Public origin for links in auth emails: the configured app URL first, so they never point at a preview host. */
+async function siteOrigin() {
+  const h = await headers();
+  return process.env.NEXT_PUBLIC_APP_URL || h.get("origin") || `https://${h.get("host")}`;
+}
 
 export async function login(
   _prevState: AuthActionState,
@@ -34,7 +41,7 @@ export async function register(
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const displayName = String(formData.get("displayName") ?? "");
-  const origin = (await headers()).get("origin");
+  const origin = await siteOrigin();
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signUp({
@@ -54,7 +61,7 @@ export async function register(
 }
 
 export async function signInWithGoogle() {
-  const origin = (await headers()).get("origin");
+  const origin = await siteOrigin();
   const supabase = await createClient();
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -67,6 +74,45 @@ export async function signInWithGoogle() {
   }
 
   redirect(data.url);
+}
+
+export async function requestPasswordReset(
+  _prevState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const email = String(formData.get("email") ?? "").trim();
+  if (!email) return { error: "Enter the email you signed up with." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${await siteOrigin()}/callback?next=/reset-password`,
+  });
+  // Rate limits are worth surfacing; anything else gets the same answer
+  // whether or not the account exists, so this can't be used to probe emails.
+  if (error?.status === 429) return { error: "Too many requests — please wait a few minutes and try again." };
+
+  return { message: "If an account exists for that email, a reset link is on its way. Check your inbox (and spam)." };
+}
+
+export async function updatePassword(
+  _prevState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+  if (password.length < 8) return { error: "Use at least 8 characters." };
+  if (password !== confirm) return { error: "The two passwords don't match." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "This reset link has expired. Request a new one from the login page." };
+
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: error.message };
+
+  redirect("/projects?password=updated");
 }
 
 export async function signOut() {

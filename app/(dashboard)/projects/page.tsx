@@ -1,14 +1,25 @@
-import { FolderKanban } from "lucide-react";
+import { CheckCircle2, FolderKanban } from "lucide-react";
 import { requireCurrentUser, getProjectsForUser } from "@/lib/supabase/queries";
 import { NewProjectDialog } from "@/components/new-project-dialog";
 import { ProjectCard } from "@/components/project-card";
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ password?: string }>;
+}) {
+  const { password } = await searchParams;
   const { authUserId } = await requireCurrentUser();
   const projects = await getProjectsForUser(authUserId);
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-10">
+      {password === "updated" && (
+        <p className="mb-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+          <CheckCircle2 className="size-4" />
+          Your password has been updated.
+        </p>
+      )}
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>

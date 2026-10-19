@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { register, signInWithGoogle } from "@/app/(auth)/actions";
+import { FREE_PLAN } from "@/lib/stripe/plans";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+// Shown once Google sign-in is enabled in Supabase (Authentication → Providers);
+// before that the button would only lead to an error page.
+const GOOGLE_AUTH_ENABLED = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
+
 export default function RegisterPage() {
   const [state, formAction, isPending] = useActionState(register, null);
 
@@ -23,7 +28,7 @@ export default function RegisterPage() {
       <CardHeader>
         <CardTitle className="text-xl">Create your account</CardTitle>
         <CardDescription>
-          Start turning manga panels into video — 100 free credits included.
+          Start turning manga panels into video — {FREE_PLAN.credits} free credits included.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -48,15 +53,19 @@ export default function RegisterPage() {
             Create account
           </Button>
         </form>
-        <div className="relative py-2 text-center text-xs text-muted-foreground">
-          <span className="bg-card relative z-10 px-2">or</span>
-          <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
-        </div>
-        <form action={signInWithGoogle}>
-          <Button type="submit" variant="outline" className="w-full">
-            Continue with Google
-          </Button>
-        </form>
+        {GOOGLE_AUTH_ENABLED && (
+          <>
+            <div className="relative py-2 text-center text-xs text-muted-foreground">
+              <span className="bg-card relative z-10 px-2">or</span>
+              <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
+            </div>
+            <form action={signInWithGoogle}>
+              <Button type="submit" variant="outline" className="w-full">
+                Continue with Google
+              </Button>
+            </form>
+          </>
+        )}
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{" "}
           <Link href="/login" className="text-primary hover:underline">
