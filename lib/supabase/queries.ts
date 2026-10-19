@@ -5,6 +5,7 @@ import {
   RENDERED_VIDEOS_BUCKET,
   resolveMediaUrl,
 } from "@/lib/supabase/signed-url";
+import { isGenerationFinalized } from "@/lib/generation/status";
 import type { GenerationRow, UserRow } from "@/lib/supabase/types";
 
 /**
@@ -14,6 +15,17 @@ import type { GenerationRow, UserRow } from "@/lib/supabase/types";
  * expiring URL before the row reaches a client component.
  */
 async function resolveGenerationMedia(generation: GenerationRow): Promise<GenerationRow> {
+  if (generation.status === "completed" && !isGenerationFinalized(generation)) {
+    // Finalizing (watermark / post-process): present it as still rendering and
+    // keep the not-yet-final video out of the browser.
+    return resolveGenerationMedia({
+      ...generation,
+      status: "processing",
+      progress: Math.min(generation.progress, 95),
+      output_video_url: null,
+    });
+  }
+
   const [sourceImageUrl, outputVideoUrl, thumbnailUrl, upscaledVideoUrl, audioUrl] =
     await Promise.all([
       resolveMediaUrl(MANGA_SOURCES_BUCKET, generation.source_image_url),

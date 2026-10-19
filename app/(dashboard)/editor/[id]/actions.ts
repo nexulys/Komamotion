@@ -28,6 +28,7 @@ import {
 } from "@/lib/generation/pipeline";
 import { getEnhancementState, type EnhancementKind } from "@/lib/generation/enhancement-status";
 import { normalizeRenderSettings } from "@/lib/ai/render-options";
+import { isGenerationFinalized } from "@/lib/generation/status";
 import { lockedRenderFeature, planAllows, queuePriorityFor, upgradeMessage } from "@/lib/stripe/plans";
 import { generateVideoTask } from "@/trigger/generate-video";
 import { postProcessGenerationTask } from "@/trigger/post-process-generation";
@@ -262,7 +263,7 @@ async function requestEnhancement(
     .eq("user_id", authUserId)
     .single();
 
-  if (!generation || generation.status !== "completed") {
+  if (!generation || !isGenerationFinalized(generation)) {
     return { error: config.notReady };
   }
 
@@ -322,12 +323,12 @@ export async function requestExportRatio(
   const admin = createServiceRoleClient();
   const { data: generation } = await admin
     .from("generations")
-    .select("id, status")
+    .select("id, status, progress")
     .eq("id", generationId)
     .eq("user_id", authUserId)
     .single();
 
-  if (!generation || generation.status !== "completed") {
+  if (!generation || !isGenerationFinalized(generation)) {
     return { error: "Generation isn't ready to export yet." };
   }
 

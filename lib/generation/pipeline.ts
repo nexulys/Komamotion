@@ -7,6 +7,7 @@ import {
   type EnhancementState,
 } from "@/lib/generation/enhancement-status";
 import { calculateCreditsCost } from "@/lib/stripe/credits";
+import { planHasWatermark } from "@/lib/stripe/plans";
 import type { CreditTransactionType, GenerationRow, GenerationStatus } from "@/lib/supabase/types";
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
@@ -208,6 +209,16 @@ export function renderedVideoPath(generation: Pick<GenerationRow, "id" | "user_i
   return `${generation.user_id}/${generation.project_id}/${generation.id}.mp4`;
 }
 
+/**
+ * Where an un-watermarked render waits for post-processing. Storage read
+ * access is scoped to the `${user_id}/` folder (migration 0002), so a file
+ * here can't be fetched by a free user who guesses the path; post-process
+ * writes the watermarked copy into their folder and deletes this one.
+ */
+export function unprocessedVideoPath(generation: Pick<GenerationRow, "id">) {
+  return `unprocessed/${generation.id}.mp4`;
+}
+
 async function mirrorRemoteFile(remoteUrl: string, path: string, fallbackContentType: string) {
   const response = await fetch(remoteUrl);
   if (!response.ok) {
@@ -248,9 +259,12 @@ export async function finalizeGenerationCompleted(
     return { generation: failed, transitioned: false };
   }
 
+  const { data: owner } = await admin.from("users").select("plan").eq("id", generation.user_id).maybeSingle();
+  const targetPath = planHasWatermark(owner?.plan) ? unprocessedVideoPath(generation) : renderedVideoPath(generation);
+
   // Throws on download/upload failure: the row stays "processing", so the
   // provider's webhook retry or the reconciliation cron tries again.
-  const videoPath = await mirrorRemoteFile(videoUrl, renderedVideoPath(generation), "video/mp4");
+  const videoPath = await mirrorRemoteFile(videoUrl, targetPath, "video/mp4");
 
   let thumbnailPath: string | null = generation.thumbnail_url;
   if (thumbnailUrl) {
