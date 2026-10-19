@@ -100,7 +100,9 @@ export default async function BillingPage({
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-sm font-medium">{plan.credits.toLocaleString()} credits / mo</p>
+                <p className="text-sm font-medium">
+                  {plan.credits.toLocaleString()} credits {plan.stripePriceId ? "/ mo" : "on signup"}
+                </p>
                 <ul className="space-y-2 text-sm text-muted-foreground">
                   {plan.features.map((f) => (
                     <li key={f} className="flex items-start gap-2">

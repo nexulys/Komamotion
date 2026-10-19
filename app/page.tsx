@@ -185,7 +185,7 @@ export default function Home() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm font-medium text-foreground">
-                    {plan.credits.toLocaleString()} credits / mo
+                    {plan.credits.toLocaleString()} credits {plan.stripePriceId ? "/ mo" : "on signup"}
                   </p>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     {plan.features.map((f) => (
