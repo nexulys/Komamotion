@@ -28,6 +28,7 @@ import {
 } from "@/lib/generation/pipeline";
 import { getEnhancementState, type EnhancementKind } from "@/lib/generation/enhancement-status";
 import { normalizeRenderSettings } from "@/lib/ai/render-options";
+import { lockedRenderFeature, planAllows, queuePriorityFor, upgradeMessage } from "@/lib/stripe/plans";
 import { generateVideoTask } from "@/trigger/generate-video";
 import { postProcessGenerationTask } from "@/trigger/post-process-generation";
 import { upscaleGenerationTask } from "@/trigger/upscale-generation";
@@ -81,10 +82,12 @@ export async function startGeneration({
   sourceImagePath: string;
   settings: AnimationSettingsValue & { removeText: boolean };
 }): Promise<ActionResult<GenerationRow>> {
-  const { authUserId } = await requireCurrentUser();
+  const { authUserId, profile } = await requireCurrentUser();
   if (!isOwnSourcePath(sourceImagePath, authUserId)) return { error: NOT_YOUR_PANEL };
   // Price and render only values the model accepts, whatever the browser sent.
   const settings = normalizeRenderSettings(requestedSettings);
+  const locked = lockedRenderFeature(profile?.plan, settings);
+  if (locked) return { error: upgradeMessage(locked) };
 
   try {
     await enforceRateLimit("generation", authUserId);
@@ -147,7 +150,7 @@ export async function startGeneration({
   }
 
   try {
-    await generateVideoTask.trigger({ generationId: generation.id });
+    await generateVideoTask.trigger({ generationId: generation.id }, { priority: queuePriorityFor(profile?.plan) });
   } catch (err) {
     console.error("[editor] could not queue render", generation.id, err);
     await finalizeGenerationFailed(generation.id, "Could not start the render. Your credits were refunded.", admin);
@@ -242,7 +245,8 @@ async function requestEnhancement(
   generationId: string
 ): Promise<ActionResult<{ queued: true; creditsBalance: number }>> {
   const config = ENHANCEMENTS[kind];
-  const { authUserId } = await requireCurrentUser();
+  const { authUserId, profile } = await requireCurrentUser();
+  if (kind === "upscale" && !planAllows(profile?.plan, "upscale")) return { error: upgradeMessage("upscale") };
   try {
     await enforceRateLimit("aiUtility", authUserId);
   } catch (err) {
@@ -452,7 +456,7 @@ export async function startBatchGeneration({
   sourceImagePaths: string[];
   settings: BatchGenerateSettings;
 }): Promise<ActionResult<{ batchId: string }>> {
-  const { authUserId } = await requireCurrentUser();
+  const { authUserId, profile } = await requireCurrentUser();
   try {
     await enforceRateLimit("generation", authUserId);
   } catch (err) {
@@ -460,11 +464,14 @@ export async function startBatchGeneration({
     throw err;
   }
 
+  if (!planAllows(profile?.plan, "batch")) return { error: upgradeMessage("batch") };
   if (sourceImagePaths.length === 0) return { error: "No panels to generate." };
   if (!sourceImagePaths.every((path) => isOwnSourcePath(path, authUserId))) return { error: NOT_YOUR_PANEL };
   if (!(await ownsProject(createServiceRoleClient(), projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
 
   const settings = normalizeRenderSettings(requestedSettings);
+  const locked = lockedRenderFeature(profile?.plan, settings);
+  if (locked) return { error: upgradeMessage(locked) };
   const batchId = crypto.randomUUID();
   try {
     // Credits are debited per panel inside the task, so a failure here costs nothing.
@@ -474,6 +481,7 @@ export async function startBatchGeneration({
       userId: authUserId,
       sourceImagePaths,
       settings,
+      priority: queuePriorityFor(profile?.plan),
     });
   } catch (err) {
     console.error("[editor] could not queue batch", batchId, err);

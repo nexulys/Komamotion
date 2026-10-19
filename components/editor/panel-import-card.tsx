@@ -5,6 +5,7 @@ import { MangaUploader, type MangaPanel } from "@/components/manga-uploader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import Link from "next/link";
 import { Label } from "@/components/ui/label";
 
 export function PanelImportCard({
@@ -13,6 +14,7 @@ export function PanelImportCard({
   selectedPanelIds,
   hasSelectedPanel,
   batchMode,
+  canBatch,
   isUploading,
   isExtracting,
   isSubmitting,
@@ -28,6 +30,8 @@ export function PanelImportCard({
   selectedPanelIds: string[];
   hasSelectedPanel: boolean;
   batchMode: boolean;
+  /** Batch rendering is a Pro feature; other plans see the switch locked. */
+  canBatch: boolean;
   isUploading: boolean;
   isExtracting: boolean;
   isSubmitting: boolean;
@@ -57,7 +61,13 @@ export function PanelImportCard({
             <Label htmlFor="batch-mode" className="text-xs text-muted-foreground">
               Batch mode
             </Label>
-            <Switch id="batch-mode" checked={batchMode} onCheckedChange={onBatchModeChange} />
+            {canBatch ? (
+              <Switch id="batch-mode" checked={batchMode} onCheckedChange={onBatchModeChange} />
+            ) : (
+              <Link href="/billing" className="text-[10px] font-medium text-primary hover:underline">
+                Pro
+              </Link>
+            )}
           </div>
         </div>
       </CardHeader>

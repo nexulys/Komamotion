@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   client: null as unknown,
   triggerError: null as Error | null,
   triggered: [] as [string, unknown][],
+  triggerOptions: [] as unknown[],
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -14,7 +15,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => h.client,
 }));
 vi.mock("@/lib/supabase/queries", () => ({
-  requireCurrentUser: async () => ({ authUserId: "u1", email: "u1@test.dev", profile: null }),
+  requireCurrentUser: async () => ({ authUserId: "u1", email: "u1@test.dev", profile: h.db.tables.users[0] }),
   getGenerationById: async () => null,
 }));
 vi.mock("@/lib/rate-limit", () => ({
@@ -35,8 +36,9 @@ vi.mock("@/lib/ai", () => ({
 
 function fakeTask(id: string) {
   return {
-    trigger: async (payload: unknown) => {
+    trigger: async (payload: unknown, options?: unknown) => {
       h.triggered.push([id, payload]);
+      h.triggerOptions.push(options);
       if (h.triggerError) throw h.triggerError;
       return { id: "run_1" };
     },
@@ -82,6 +84,7 @@ function seed({ balance = 50, plan = "studio", generation = {} as Record<string,
   h.client = createFakeClient(h.db);
   h.triggerError = null;
   h.triggered = [];
+  h.triggerOptions = [];
   h.db.tables = {
     users: [{ id: "u1", plan, credits_balance: balance }],
     projects: [
@@ -177,6 +180,18 @@ describe("startGeneration", () => {
 describe("startBatchGeneration", () => {
   const batch = (paths = ["u1/p1/a.png", "u1/p1/b.png"], projectId = "p1") =>
     actions.startBatchGeneration({ projectId, sourceImagePaths: paths, settings: SETTINGS });
+  beforeEach(() => seed({ plan: "pro" }));
+
+  it("is a Pro feature", async () => {
+    seed({ plan: "studio" });
+    expect((await batch()).error).toMatch(/Batch rendering is available on the Pro Studio plan/);
+    expect(h.triggered).toEqual([]);
+  });
+
+  it("queues with the plan's priority", async () => {
+    expect((await batch()).error).toBeUndefined();
+    expect(h.triggered[0][1]).toMatchObject({ priority: 300, settings: { durationSeconds: 6 } });
+  });
 
   it("reports a queueing failure instead of throwing (nothing was charged)", async () => {
     h.triggerError = new Error("down");
@@ -188,6 +203,38 @@ describe("startBatchGeneration", () => {
     expect((await batch(["u1/p1/a.png", "u2/p9/b.png"])).error).toMatch(/can't be used/);
     expect((await batch(undefined, "p-other")).error).toBe("Project not found.");
     expect(h.triggered).toEqual([]);
+  });
+});
+
+describe("plan features", () => {
+  const start = (settings: Partial<AnimationSettingsValue>) =>
+    actions.startGeneration({ projectId: "p1", sourceImagePath: "u1/p1/panel.png", settings: { ...SETTINGS, ...settings } });
+
+  it("keeps 4K, colorize and text removal for Studio and up", async () => {
+    for (const plan of ["free", "starter"]) {
+      seed({ plan });
+      expect((await start({ resolution: "4k" })).error).toMatch(/4K renders is available on the Studio plan/);
+      expect((await start({ colorize: true })).error).toMatch(/AI colorization/);
+      expect((await start({ removeText: true })).error).toMatch(/Text & bubble removal/);
+      expect((await actions.requestUpscale("g1")).error).toMatch(/4K upscaling/);
+      expect(balance()).toBe(50);
+    }
+    seed({ plan: "studio" });
+    expect((await start({ resolution: "4k", colorize: true, removeText: true })).error).toBeUndefined();
+  });
+
+  it("lets every plan render 1080p and add sound", async () => {
+    seed({ plan: "free" });
+    expect((await start({})).error).toBeUndefined();
+    expect((await actions.requestAudio("g1")).error).toBeUndefined();
+  });
+
+  it("gives paid plans a queue head start", async () => {
+    seed({ plan: "free" });
+    await start({});
+    seed({ plan: "studio" });
+    await start({});
+    expect(h.triggerOptions).toEqual([{ priority: 60 }]);
   });
 });
 

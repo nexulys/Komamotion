@@ -1,6 +1,7 @@
 "use client";
 
-import { Eraser, Palette, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { Eraser, Lock, Palette, Sparkles } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
@@ -13,7 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import type { CameraMovement, Resolution } from "@/lib/supabase/types";
+import type { CameraMovement, PlanId, Resolution } from "@/lib/supabase/types";
+import { cheapestPlanWith, planAllows, type PlanFeature } from "@/lib/stripe/plans";
 import { calculateCreditsCost } from "@/lib/stripe/credits";
 import { VIDEO_DURATIONS, VIDEO_FPS } from "@/lib/ai/render-options";
 
@@ -43,13 +45,29 @@ interface AnimationSettingsProps {
   value: AnimationSettingsValue;
   onChange: (value: AnimationSettingsValue) => void;
   disabled?: boolean;
+  /** Options outside this plan are shown locked, with an upgrade link (the server refuses them too). */
+  plan?: PlanId;
+}
+
+/** Small "Studio" pill linking to Billing, shown next to options the plan doesn't include. */
+function PlanLock({ feature }: { feature: PlanFeature }) {
+  return (
+    <Link href="/billing" className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10">
+      <Lock className="size-3" />
+      {cheapestPlanWith(feature).name}
+    </Link>
+  );
 }
 
 export function AnimationSettings({
   value,
   onChange,
   disabled,
+  plan = "free",
 }: AnimationSettingsProps) {
+  const can4k = planAllows(plan, "4k");
+  const canColorize = planAllows(plan, "colorize");
+  const canRemoveText = planAllows(plan, "removeText");
   const update = <K extends keyof AnimationSettingsValue>(
     key: K,
     v: AnimationSettingsValue[K]
@@ -149,7 +167,7 @@ export function AnimationSettings({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Resolution</Label>
+          <Label className="flex items-center gap-2">Resolution {!can4k && <PlanLock feature="4k" />}</Label>
           <Select
             value={value.resolution}
             onValueChange={(v) => update("resolution", v as Resolution)}
@@ -159,7 +177,9 @@ export function AnimationSettings({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="1080p">1080p</SelectItem>
-              <SelectItem value="4k">4K</SelectItem>
+              <SelectItem value="4k" disabled={!can4k}>
+                4K{!can4k && " (Studio+)"}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -169,7 +189,9 @@ export function AnimationSettings({
         <div className="flex items-center gap-2">
           <Palette className="size-4 text-primary" />
           <div>
-            <p className="text-sm font-medium">Dynamic colorization</p>
+            <p className="flex items-center gap-2 text-sm font-medium">
+              Dynamic colorization {!canColorize && <PlanLock feature="colorize" />}
+            </p>
             <p className="text-xs text-muted-foreground">
               AI-colorize black & white panels before animating
             </p>
@@ -177,6 +199,7 @@ export function AnimationSettings({
         </div>
         <Switch
           checked={value.colorize}
+          disabled={!canColorize}
           onCheckedChange={(v) => update("colorize", v)}
         />
       </div>
@@ -185,7 +208,9 @@ export function AnimationSettings({
         <div className="flex items-center gap-2">
           <Eraser className="size-4 text-primary" />
           <div>
-            <p className="text-sm font-medium">Remove speech bubbles &amp; SFX text</p>
+            <p className="flex items-center gap-2 text-sm font-medium">
+              Remove speech bubbles &amp; SFX text {!canRemoveText && <PlanLock feature="removeText" />}
+            </p>
             <p className="text-xs text-muted-foreground">
               AI inpainting cleans dialogue balloons and sound effects before animating
             </p>
@@ -193,6 +218,7 @@ export function AnimationSettings({
         </div>
         <Switch
           checked={value.removeText}
+          disabled={!canRemoveText}
           onCheckedChange={(v) => update("removeText", v)}
         />
       </div>

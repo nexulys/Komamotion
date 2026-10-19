@@ -1,5 +1,8 @@
 import type { PlanId } from "@/lib/supabase/types";
 
+/** Paid features a plan unlocks — enforced server-side and greyed out in the editor. */
+export type PlanFeature = "4k" | "upscale" | "colorize" | "removeText" | "batch";
+
 export type Plan = {
   id: PlanId;
   name: string;
@@ -12,6 +15,9 @@ export type Plan = {
   watermark: boolean;
   highlighted?: boolean;
   features: string[];
+  allows: PlanFeature[];
+  /** Trigger.dev run priority (seconds of queue head start) for this plan's renders. */
+  queuePriority: number;
 };
 
 /**
@@ -32,6 +38,8 @@ export const FREE_PLAN: Plan = {
     "\"KomaMotion AI Free\" watermark",
     "Standard queue priority",
   ],
+  allows: [],
+  queuePriority: 0,
 };
 
 export const PLANS: Plan[] = [
@@ -47,8 +55,10 @@ export const PLANS: Plan[] = [
       "600 render credits / month",
       "1080p MP4 export, no watermark",
       "Standard queue priority",
-      "Community support",
+      "Email support",
     ],
+    allows: [],
+    queuePriority: 0,
   },
   {
     id: "studio",
@@ -66,6 +76,8 @@ export const PLANS: Plan[] = [
       "Priority render queue",
       "Email support",
     ],
+    allows: ["4k", "upscale", "colorize", "removeText"],
+    queuePriority: 60,
   },
   {
     id: "pro",
@@ -81,9 +93,10 @@ export const PLANS: Plan[] = [
       "AI colorization, panel cleanup & upscaling",
       "Batch chapter processing",
       "Highest render priority",
-      "Team seats & shared projects",
-      "Priority support",
+      "Priority email support",
     ],
+    allows: ["4k", "upscale", "colorize", "removeText", "batch"],
+    queuePriority: 300,
   },
 ];
 
@@ -107,4 +120,40 @@ export function getPlanByPriceId(priceId: string | null | undefined) {
 
 export function planHasWatermark(planId: string | null | undefined) {
   return getPlanById(planId)?.watermark ?? true;
+}
+
+export function planAllows(planId: string | null | undefined, feature: PlanFeature) {
+  return (getPlanById(planId) ?? FREE_PLAN).allows.includes(feature);
+}
+
+/** The cheapest plan that unlocks a feature, for "Upgrade to …" hints. */
+export function cheapestPlanWith(feature: PlanFeature) {
+  return PLANS.find((p) => p.allows.includes(feature)) ?? PLANS[PLANS.length - 1];
+}
+
+export function queuePriorityFor(planId: string | null | undefined) {
+  return (getPlanById(planId) ?? FREE_PLAN).queuePriority;
+}
+
+const FEATURE_LABEL: Record<PlanFeature, string> = {
+  "4k": "4K renders",
+  upscale: "4K upscaling",
+  colorize: "AI colorization",
+  removeText: "Text & bubble removal",
+  batch: "Batch rendering",
+};
+
+/** The first paid option in these render settings the plan doesn't include, if any. */
+export function lockedRenderFeature(
+  planId: string | null | undefined,
+  settings: { resolution: string; colorize: boolean; removeText: boolean }
+): PlanFeature | null {
+  if (settings.resolution === "4k" && !planAllows(planId, "4k")) return "4k";
+  if (settings.colorize && !planAllows(planId, "colorize")) return "colorize";
+  if (settings.removeText && !planAllows(planId, "removeText")) return "removeText";
+  return null;
+}
+
+export function upgradeMessage(feature: PlanFeature) {
+  return `${FEATURE_LABEL[feature]} is available on the ${cheapestPlanWith(feature).name} plan and above. Upgrade in Billing.`;
 }

@@ -26,6 +26,7 @@ export default async function EditorPage({
       initialGenerations={generations}
       credits={profile?.credits_balance ?? 0}
       userId={authUserId}
+      plan={profile?.plan ?? "free"}
     />
   );
 }

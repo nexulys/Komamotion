@@ -37,18 +37,21 @@ import {
   getEnhancementState,
   type EnhancementKind,
 } from "@/lib/generation/enhancement-status";
-import type { ExportRatio, GenerationExportRow, GenerationRow, ProjectRow } from "@/lib/supabase/types";
+import { planAllows } from "@/lib/stripe/plans";
+import type { ExportRatio, GenerationExportRow, GenerationRow, PlanId, ProjectRow } from "@/lib/supabase/types";
 
 export function EditorWorkspace({
   project,
   initialGenerations,
   credits,
   userId,
+  plan,
 }: {
   project: ProjectRow;
   initialGenerations: GenerationRow[];
   credits: number;
   userId: string;
+  plan: PlanId;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -353,6 +356,7 @@ export function EditorWorkspace({
           selectedPanelIds={selectedPanelIds}
           hasSelectedPanel={!!selectedPanel}
           batchMode={batchMode}
+          canBatch={planAllows(plan, "batch")}
           isUploading={isUploading}
           isExtracting={isExtracting}
           isSubmitting={isSubmitting}
@@ -374,6 +378,7 @@ export function EditorWorkspace({
           onUpscale={(generationId) => handleEnhancement("upscale", generationId)}
           onAudio={(generationId) => handleEnhancement("audio", generationId)}
           onExport={handleExport}
+          canUpscale={planAllows(plan, "upscale")}
         />
 
         {generations.length > 0 && <RenderHistoryCard generations={generations} />}
@@ -387,6 +392,7 @@ export function EditorWorkspace({
           hasSelectedPanel={!!selectedPanel}
           isSubmitting={isSubmitting}
           onGenerate={handleGenerate}
+          plan={plan}
         />
       </div>
     </div>

@@ -4,6 +4,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { AnimationSettings, type AnimationSettingsValue } from "@/components/animation-settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { PlanId } from "@/lib/supabase/types";
 
 /** Right-hand column: animation settings plus the single-panel generate button (hidden in batch mode). */
 export function SettingsPanel({
@@ -13,6 +14,7 @@ export function SettingsPanel({
   hasSelectedPanel,
   isSubmitting,
   onGenerate,
+  plan,
 }: {
   settings: AnimationSettingsValue;
   onSettingsChange: (settings: AnimationSettingsValue) => void;
@@ -20,6 +22,7 @@ export function SettingsPanel({
   hasSelectedPanel: boolean;
   isSubmitting: boolean;
   onGenerate: () => void;
+  plan: PlanId;
 }) {
   return (
     <>
@@ -28,7 +31,7 @@ export function SettingsPanel({
           <CardTitle className="text-base">3. Animation settings</CardTitle>
         </CardHeader>
         <CardContent>
-          <AnimationSettings value={settings} onChange={onSettingsChange} disabled={isSubmitting} />
+          <AnimationSettings value={settings} onChange={onSettingsChange} disabled={isSubmitting} plan={plan} />
         </CardContent>
       </Card>
 
