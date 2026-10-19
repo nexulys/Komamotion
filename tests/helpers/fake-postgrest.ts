@@ -147,7 +147,7 @@ export function createFakeClient(db: FakeDb) {
       return respond(q.get("limit") ? rows.slice(0, Number(q.get("limit"))) : rows);
     }
     if (method === "POST") {
-      const items = (Array.isArray(body) ? body : [body]).map((b: Row) => ({
+      const items: Row[] = (Array.isArray(body) ? body : [body]).map((b: Row) => ({
         id: b.id ?? `${path}-${++seq}`,
         created_at: new Date().toISOString(),
         ...b,
