@@ -3,6 +3,7 @@ import { LayoutDashboard, ShieldAlert, Users, Film } from "lucide-react";
 import { requireAdmin } from "@/lib/admin/queries";
 import { Logo } from "@/components/branding/logo";
 import { Badge } from "@/components/ui/badge";
+import { MobileNav } from "@/components/mobile-nav";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
@@ -45,7 +46,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </Link>
         </div>
       </aside>
-      <main className="flex-1 bg-background">{children}</main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <MobileNav
+          items={[...NAV_ITEMS.map(({ href, label }) => ({ href, label })), { href: "/projects", label: "← App" }]}
+          exact={["/admin"]}
+        />
+        <main className="flex-1 bg-background">{children}</main>
+      </div>
     </div>
   );
 }

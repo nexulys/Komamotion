@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { AccountDeletedNotice } from "@/components/account-deleted-notice";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -68,6 +70,9 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
+      <Suspense>
+        <AccountDeletedNotice />
+      </Suspense>
       <main className="flex-1">
         <section className="relative overflow-hidden">
           <div

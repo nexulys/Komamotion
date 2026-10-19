@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Coins, Film, FolderKanban, ShieldAlert } from "lucide-react";
+import { Coins, Film, FolderKanban, ShieldAlert, UserRound } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/queries";
 import { Logo } from "@/components/branding/logo";
 import { NexulysBadge } from "@/components/branding/nexulys-badge";
 import { Badge } from "@/components/ui/badge";
 import { UserMenu } from "@/components/user-menu";
+import { MobileNav } from "@/components/mobile-nav";
 
 const NAV_ITEMS = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/billing", label: "Billing", icon: Coins },
+  { href: "/account", label: "Account", icon: UserRound },
 ];
 
 export default async function DashboardLayout({
@@ -65,10 +67,10 @@ export default async function DashboardLayout({
 
       <div className="flex min-h-screen flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border/60 bg-background/80 px-6 backdrop-blur-lg">
-          <div className="flex items-center gap-2 md:hidden">
+          <Link href="/projects" className="flex items-center gap-2 md:hidden">
             <Film className="size-5 text-primary" />
             <span className="font-semibold">KomaMotion</span>
-          </div>
+          </Link>
           <div className="hidden text-sm text-muted-foreground md:block">
             KomaMotion — <span className="text-foreground">A Nexulys SaaS</span>
           </div>
@@ -78,6 +80,12 @@ export default async function DashboardLayout({
             credits={credits}
           />
         </header>
+        <MobileNav
+          items={[
+            ...NAV_ITEMS.map(({ href, label }) => ({ href, label })),
+            ...(current.profile?.is_admin ? [{ href: "/admin", label: "Admin" }] : []),
+          ]}
+        />
         <main className="flex-1 bg-background">{children}</main>
       </div>
     </div>
