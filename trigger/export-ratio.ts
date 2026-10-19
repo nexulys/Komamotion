@@ -7,12 +7,15 @@ import {
   resolveMediaUrl,
   uploadBufferToStorage,
 } from "@/lib/supabase/signed-url";
+import { failExport } from "@/lib/generation/pipeline";
+
+type ExportPayload = { generationExportId: string; creditsCost: number };
 
 /** Crops a completed render to a channel-specific aspect ratio (16:9 / 9:16 / 1:1) on demand. */
 export const exportRatioTask = task({
   id: "export-ratio",
   retry: { maxAttempts: 3, minTimeoutInMs: 3000, maxTimeoutInMs: 30_000, factor: 2 },
-  run: async (payload: { generationExportId: string }) => {
+  run: async (payload: ExportPayload) => {
     const admin = createServiceRoleClient();
 
     const { data: exportRow } = await admin
@@ -33,10 +36,11 @@ export const exportRatioTask = task({
       .single();
 
     if (!generation?.output_video_url) {
-      await admin
-        .from("generation_exports")
-        .update({ status: "failed", error_message: "Source render has no output video" })
-        .eq("id", exportRow.id);
+      await failExport(admin, {
+        exportId: exportRow.id,
+        creditsCost: payload.creditsCost,
+        message: "Source render has no output video",
+      });
       return;
     }
 
@@ -60,12 +64,16 @@ export const exportRatioTask = task({
 
       logger.info("Ratio export complete", { id: exportRow.id, ratio: exportRow.ratio });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Export failed";
-      await admin
-        .from("generation_exports")
-        .update({ status: "failed", error_message: message })
-        .eq("id", exportRow.id);
+      // Rethrow so Trigger.dev retries; onFailure flags + refunds once retries run out.
+      logger.warn("Ratio export attempt failed", { id: exportRow.id, error: err instanceof Error ? err.message : String(err) });
       throw err;
     }
+  },
+  onFailure: async ({ payload, error }) => {
+    await failExport(createServiceRoleClient(), {
+      exportId: payload.generationExportId,
+      creditsCost: payload.creditsCost,
+      message: error instanceof Error ? error.message : "Export failed",
+    });
   },
 });

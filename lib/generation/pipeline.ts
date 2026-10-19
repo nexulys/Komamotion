@@ -158,6 +158,46 @@ export async function failEnhancement(
 }
 
 // ============================================================
+// Paid exports / panel splits — a definitive failure flips the row to
+// "failed" and refunds, conditionally, so a retried hook can't refund twice.
+// ============================================================
+
+export async function failExport(
+  admin: ServiceClient,
+  { exportId, creditsCost, message }: { exportId: string; creditsCost: number; message: string }
+) {
+  const { data } = await admin
+    .from("generation_exports")
+    .update({ status: "failed", error_message: message })
+    .eq("id", exportId)
+    .neq("status", "failed")
+    .select("user_id, generation_id");
+  const row = data?.[0];
+  if (!row || creditsCost <= 0) return;
+  await refundCredits(admin, {
+    userId: row.user_id,
+    amount: creditsCost,
+    generationId: row.generation_id,
+    description: "Refund for failed export",
+  });
+}
+
+export async function failPanelExtraction(
+  admin: ServiceClient,
+  { extractionId, creditsCost, message }: { extractionId: string; creditsCost: number; message: string }
+) {
+  const { data } = await admin
+    .from("panel_extractions")
+    .update({ status: "failed", error_message: message })
+    .eq("id", extractionId)
+    .neq("status", "failed")
+    .select("user_id");
+  const row = data?.[0];
+  if (!row || creditsCost <= 0) return;
+  await refundCredits(admin, { userId: row.user_id, amount: creditsCost, description: "Refund for failed panel split" });
+}
+
+// ============================================================
 // Render persistence — provider CDN URLs expire after a few days, so the
 // finished files are copied into our private bucket before the
 // generation is marked completed.

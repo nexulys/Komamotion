@@ -18,6 +18,8 @@ import {
   claimEnhancement,
   deductCredits,
   failEnhancement,
+  failExport,
+  failPanelExtraction,
   finalizeGenerationCompleted,
   finalizeGenerationFailed,
   getCreditsBalance,
@@ -36,6 +38,21 @@ import type { AnimationSettingsValue } from "@/components/animation-settings";
 import type { ExportRatio, ExportStatus, GenerationRow } from "@/lib/supabase/types";
 
 type ActionResult<T> = { data?: T; error?: string };
+
+// The service-role client bypasses RLS, so every action that takes a project
+// id or a storage path from the browser checks ownership itself.
+async function ownsProject(admin: ReturnType<typeof createServiceRoleClient>, projectId: string, userId: string) {
+  const { data } = await admin.from("projects").select("id").eq("id", projectId).eq("user_id", userId).maybeSingle();
+  return data !== null;
+}
+
+/** Uploads and extracted panels live under `${userId}/…` in the manga-sources bucket. */
+function isOwnSourcePath(path: string, userId: string) {
+  return path.startsWith(`${userId}/`) && !path.split("/").includes("..");
+}
+
+const NOT_YOUR_PROJECT = "Project not found.";
+const NOT_YOUR_PANEL = "This panel can't be used — re-upload it and try again.";
 
 async function debitCredits(
   admin: ReturnType<typeof createServiceRoleClient>,
@@ -64,6 +81,7 @@ export async function startGeneration({
   settings: AnimationSettingsValue & { removeText: boolean };
 }): Promise<ActionResult<GenerationRow>> {
   const { authUserId } = await requireCurrentUser();
+  if (!isOwnSourcePath(sourceImagePath, authUserId)) return { error: NOT_YOUR_PANEL };
 
   try {
     await enforceRateLimit("generation", authUserId);
@@ -88,6 +106,7 @@ export async function startGeneration({
   });
 
   const admin = createServiceRoleClient();
+  if (!(await ownsProject(admin, projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
   const debit = await debitCredits(admin, authUserId, creditsCost, `Render for project ${projectId}`);
   if (!debit.ok) {
     return { error: `Not enough credits. This render needs ${creditsCost}, you have ${debit.balance}.` };
@@ -124,8 +143,14 @@ export async function startGeneration({
     return { error: insertError?.message ?? "Could not create generation." };
   }
 
+  try {
+    await generateVideoTask.trigger({ generationId: generation.id });
+  } catch (err) {
+    console.error("[editor] could not queue render", generation.id, err);
+    await finalizeGenerationFailed(generation.id, "Could not start the render. Your credits were refunded.", admin);
+    return { error: "Could not start the render. Your credits were refunded." };
+  }
   await admin.from("projects").update({ status: "processing" }).eq("id", projectId);
-  await generateVideoTask.trigger({ generationId: generation.id });
 
   revalidatePath(`/editor/${projectId}`);
   return { data: { ...generation, credits_cost: creditsCost } };
@@ -317,7 +342,13 @@ export async function requestExportRatio(
     return { error: error?.message ?? "Could not queue export." };
   }
 
-  await exportRatioTask.trigger({ generationExportId: exportRow.id });
+  try {
+    await exportRatioTask.trigger({ generationExportId: exportRow.id, creditsCost });
+  } catch (err) {
+    console.error("[editor] could not queue export", exportRow.id, err);
+    await failExport(admin, { exportId: exportRow.id, creditsCost, message: "Could not be queued" });
+    return { error: "Could not start the export. Your credits were refunded." };
+  }
   return { data: { queued: true, creditsBalance: await getCreditsBalance(admin, authUserId) } };
 }
 
@@ -326,6 +357,7 @@ export async function requestPanelExtraction(
   sourcePagePath: string
 ): Promise<ActionResult<{ panelExtractionId: string; creditsBalance: number }>> {
   const { authUserId } = await requireCurrentUser();
+  if (!isOwnSourcePath(sourcePagePath, authUserId)) return { error: NOT_YOUR_PANEL };
   try {
     await enforceRateLimit("aiUtility", authUserId);
   } catch (err) {
@@ -334,13 +366,14 @@ export async function requestPanelExtraction(
   }
 
   const admin = createServiceRoleClient();
+  if (!(await ownsProject(admin, projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
   const creditsCost = calculatePanelExtractionCreditsCost();
   const debit = await debitCredits(admin, authUserId, creditsCost, `Panel split for project ${projectId}`);
   if (!debit.ok) return { error: `Not enough credits. Splitting a page needs ${creditsCost}.` };
 
   const { data: extraction, error } = await admin
     .from("panel_extractions")
-    .insert({ project_id: projectId, user_id: authUserId, source_page_url: sourcePagePath })
+    .insert({ project_id: projectId, user_id: authUserId, source_page_url: sourcePagePath, status: "pending" })
     .select("id")
     .single();
 
@@ -349,7 +382,13 @@ export async function requestPanelExtraction(
     return { error: error?.message ?? "Could not queue panel extraction." };
   }
 
-  await extractPanelsTask.trigger({ panelExtractionId: extraction.id });
+  try {
+    await extractPanelsTask.trigger({ panelExtractionId: extraction.id, creditsCost });
+  } catch (err) {
+    console.error("[editor] could not queue panel extraction", extraction.id, err);
+    await failPanelExtraction(admin, { extractionId: extraction.id, creditsCost, message: "Could not be queued" });
+    return { error: "Could not start splitting this page. Your credits were refunded." };
+  }
   return {
     data: { panelExtractionId: extraction.id, creditsBalance: await getCreditsBalance(admin, authUserId) },
   };
@@ -419,15 +458,23 @@ export async function startBatchGeneration({
   }
 
   if (sourceImagePaths.length === 0) return { error: "No panels to generate." };
+  if (!sourceImagePaths.every((path) => isOwnSourcePath(path, authUserId))) return { error: NOT_YOUR_PANEL };
+  if (!(await ownsProject(createServiceRoleClient(), projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
 
   const batchId = crypto.randomUUID();
-  await batchGenerateTask.trigger({
-    batchId,
-    projectId,
-    userId: authUserId,
-    sourceImagePaths,
-    settings,
-  });
+  try {
+    // Credits are debited per panel inside the task, so a failure here costs nothing.
+    await batchGenerateTask.trigger({
+      batchId,
+      projectId,
+      userId: authUserId,
+      sourceImagePaths,
+      settings,
+    });
+  } catch (err) {
+    console.error("[editor] could not queue batch", batchId, err);
+    return { error: "Could not start the batch render. No credits were used." };
+  }
 
   revalidatePath(`/editor/${projectId}`);
   return { data: { batchId } };

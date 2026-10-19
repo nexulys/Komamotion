@@ -8,6 +8,7 @@ import {
   uploadBufferToStorage,
 } from "@/lib/supabase/signed-url";
 import { planHasWatermark } from "@/lib/stripe/plans";
+import { refundCredits } from "@/lib/generation/pipeline";
 
 /**
  * Runs right after a render completes (triggered from the AI webhook
@@ -67,5 +68,33 @@ export const postProcessGenerationTask = task({
     }
 
     logger.info("Watermark applied", { generationId: generation.id });
+  },
+  // The video is only shown once finalized (progress 100). If that can't
+  // happen, fail the render and refund rather than charging for a video
+  // the user never gets.
+  onFailure: async ({ payload, error }) => {
+    const admin = createServiceRoleClient();
+    const { data } = await admin
+      .from("generations")
+      .update({
+        status: "failed",
+        error_message: "Your video could not be finalized. Your credits were refunded.",
+      })
+      .eq("id", payload.generationId)
+      .eq("status", "completed")
+      .lt("progress", 100)
+      .select("user_id, credits_cost");
+    const row = data?.[0];
+    if (!row) return;
+    logger.error("Post-process failed for good", {
+      generationId: payload.generationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await refundCredits(admin, {
+      userId: row.user_id,
+      amount: row.credits_cost,
+      generationId: payload.generationId,
+      description: "Refund — video could not be finalized",
+    });
   },
 });

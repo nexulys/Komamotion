@@ -93,4 +93,13 @@ export const generateVideoTask = task({
       await finalizeGenerationFailed(generation.id, message, admin);
     }
   },
+  // Anything that throws before submission (e.g. the source image can't be
+  // signed) lands here once retries run out: fail the row and refund.
+  onFailure: async ({ payload, error }) => {
+    await finalizeGenerationFailed(
+      payload.generationId,
+      error instanceof Error ? error.message : "The render could not be started",
+      createServiceRoleClient()
+    );
+  },
 });
