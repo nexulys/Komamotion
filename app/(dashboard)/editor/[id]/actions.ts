@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getGenerationById, requireCurrentUser } from "@/lib/supabase/queries";
-import { resolveMediaUrl, MANGA_SOURCES_BUCKET, RENDERED_VIDEOS_BUCKET } from "@/lib/supabase/signed-url";
+import { deleteFromStorage, resolveMediaUrl, MANGA_SOURCES_BUCKET, RENDERED_VIDEOS_BUCKET } from "@/lib/supabase/signed-url";
 import { getDefaultProvider, getVideoGenerationStatus } from "@/lib/ai";
 import { estimateGenerationCostUsd } from "@/lib/ai/costs";
 import {
@@ -15,12 +15,21 @@ import {
 } from "@/lib/stripe/credits";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import {
+  claimEnhancement,
   deductCredits,
+  failEnhancement,
+  failExport,
+  failPanelExtraction,
   finalizeGenerationCompleted,
   finalizeGenerationFailed,
   getCreditsBalance,
   refundCredits,
+  releaseEnhancement,
 } from "@/lib/generation/pipeline";
+import { getEnhancementState, type EnhancementKind } from "@/lib/generation/enhancement-status";
+import { normalizeRenderSettings } from "@/lib/ai/render-options";
+import { isGenerationFinalized } from "@/lib/generation/status";
+import { lockedRenderFeature, planAllows, queuePriorityFor, upgradeMessage } from "@/lib/stripe/plans";
 import { generateVideoTask } from "@/trigger/generate-video";
 import { postProcessGenerationTask } from "@/trigger/post-process-generation";
 import { upscaleGenerationTask } from "@/trigger/upscale-generation";
@@ -32,6 +41,21 @@ import type { AnimationSettingsValue } from "@/components/animation-settings";
 import type { ExportRatio, ExportStatus, GenerationRow } from "@/lib/supabase/types";
 
 type ActionResult<T> = { data?: T; error?: string };
+
+// The service-role client bypasses RLS, so every action that takes a project
+// id or a storage path from the browser checks ownership itself.
+async function ownsProject(admin: ReturnType<typeof createServiceRoleClient>, projectId: string, userId: string) {
+  const { data } = await admin.from("projects").select("id").eq("id", projectId).eq("user_id", userId).maybeSingle();
+  return data !== null;
+}
+
+/** Uploads and extracted panels live under `${userId}/…` in the manga-sources bucket. */
+function isOwnSourcePath(path: string, userId: string) {
+  return path.startsWith(`${userId}/`) && !path.split("/").includes("..");
+}
+
+const NOT_YOUR_PROJECT = "Project not found.";
+const NOT_YOUR_PANEL = "This panel can't be used — re-upload it and try again.";
 
 async function debitCredits(
   admin: ReturnType<typeof createServiceRoleClient>,
@@ -53,13 +77,18 @@ export async function getGeneration(generationId: string): Promise<GenerationRow
 export async function startGeneration({
   projectId,
   sourceImagePath,
-  settings,
+  settings: requestedSettings,
 }: {
   projectId: string;
   sourceImagePath: string;
   settings: AnimationSettingsValue & { removeText: boolean };
 }): Promise<ActionResult<GenerationRow>> {
-  const { authUserId } = await requireCurrentUser();
+  const { authUserId, profile } = await requireCurrentUser();
+  if (!isOwnSourcePath(sourceImagePath, authUserId)) return { error: NOT_YOUR_PANEL };
+  // Price and render only values the model accepts, whatever the browser sent.
+  const settings = normalizeRenderSettings(requestedSettings);
+  const locked = lockedRenderFeature(profile?.plan, settings);
+  if (locked) return { error: upgradeMessage(locked) };
 
   try {
     await enforceRateLimit("generation", authUserId);
@@ -84,6 +113,7 @@ export async function startGeneration({
   });
 
   const admin = createServiceRoleClient();
+  if (!(await ownsProject(admin, projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
   const debit = await debitCredits(admin, authUserId, creditsCost, `Render for project ${projectId}`);
   if (!debit.ok) {
     return { error: `Not enough credits. This render needs ${creditsCost}, you have ${debit.balance}.` };
@@ -120,8 +150,14 @@ export async function startGeneration({
     return { error: insertError?.message ?? "Could not create generation." };
   }
 
+  try {
+    await generateVideoTask.trigger({ generationId: generation.id }, { priority: queuePriorityFor(profile?.plan) });
+  } catch (err) {
+    console.error("[editor] could not queue render", generation.id, err);
+    await finalizeGenerationFailed(generation.id, "Could not start the render. Your credits were refunded.", admin);
+    return { error: "Could not start the render. Your credits were refunded." };
+  }
   await admin.from("projects").update({ status: "processing" }).eq("id", projectId);
-  await generateVideoTask.trigger({ generationId: generation.id });
 
   revalidatePath(`/editor/${projectId}`);
   return { data: { ...generation, credits_cost: creditsCost } };
@@ -179,8 +215,39 @@ export async function refreshGenerationStatus(generationId: string): Promise<Act
   return { data: generation };
 }
 
-export async function requestUpscale(generationId: string): Promise<ActionResult<{ queued: true }>> {
-  const { authUserId } = await requireCurrentUser();
+const ENHANCEMENTS = {
+  upscale: {
+    label: "4K upscale",
+    notReady: "Generation isn't ready to upscale yet.",
+    alreadyRunning: "A 4K upscale is already running for this render.",
+    notEnoughCredits: (cost: number) => `Not enough credits. Upscaling needs ${cost}.`,
+    creditsCost: calculateUpscaleCreditsCost,
+    task: upscaleGenerationTask,
+  },
+  audio: {
+    label: "AI sound",
+    notReady: "Generation isn't ready for audio yet.",
+    alreadyRunning: "AI sound is already being generated for this render.",
+    notEnoughCredits: (cost: number) => `Not enough credits. AI sound needs ${cost}.`,
+    creditsCost: calculateAudioCreditsCost,
+    task: generateAudioTask,
+  },
+} as const;
+
+/**
+ * Shared flow for the on-demand 4K upscale / AI sound jobs: claim the job on
+ * the generation row first (so a double click can't be charged twice), then
+ * debit, then queue. Every exit after the claim leaves the row and the
+ * balance consistent: refused debit → claim released; queueing failure →
+ * refund + status failed.
+ */
+async function requestEnhancement(
+  kind: EnhancementKind,
+  generationId: string
+): Promise<ActionResult<{ queued: true; creditsBalance: number }>> {
+  const config = ENHANCEMENTS[kind];
+  const { authUserId, profile } = await requireCurrentUser();
+  if (kind === "upscale" && !planAllows(profile?.plan, "upscale")) return { error: upgradeMessage("upscale") };
   try {
     await enforceRateLimit("aiUtility", authUserId);
   } catch (err) {
@@ -196,51 +263,80 @@ export async function requestUpscale(generationId: string): Promise<ActionResult
     .eq("user_id", authUserId)
     .single();
 
-  if (!generation || generation.status !== "completed") {
-    return { error: "Generation isn't ready to upscale yet." };
+  if (!generation || !isGenerationFinalized(generation)) {
+    return { error: config.notReady };
   }
 
-  const creditsCost = calculateUpscaleCreditsCost(generation.duration_seconds);
-  const debit = await debitCredits(admin, authUserId, creditsCost, `4K upscale for generation ${generationId}`);
-  if (!debit.ok) return { error: `Not enough credits. Upscaling needs ${creditsCost}.` };
+  const previous = getEnhancementState(generation, kind);
+  const claimed = await claimEnhancement(admin, { generationId, userId: authUserId, kind });
+  if (!claimed) return { error: config.alreadyRunning };
 
-  await upscaleGenerationTask.trigger({ generationId, creditsCost });
-  return { data: { queued: true } };
+  const creditsCost = config.creditsCost(generation.duration_seconds);
+  const debit = await debitCredits(admin, authUserId, creditsCost, `${config.label} for generation ${generationId}`);
+  if (!debit.ok) {
+    await releaseEnhancement(admin, { generationId, kind, previous });
+    return { error: config.notEnoughCredits(creditsCost) };
+  }
+
+  try {
+    await config.task.trigger({ generationId, creditsCost });
+  } catch (err) {
+    console.error(`[editor] could not queue ${kind}`, err);
+    await failEnhancement(admin, {
+      generationId,
+      userId: authUserId,
+      kind,
+      creditsCost,
+      description: `Refund — ${config.label} could not be queued`,
+    });
+    return { error: `Could not start the ${config.label}. Your credits were refunded.` };
+  }
+
+  return { data: { queued: true, creditsBalance: await getCreditsBalance(admin, authUserId) } };
 }
 
-export async function requestAudio(generationId: string): Promise<ActionResult<{ queued: true }>> {
+export async function requestUpscale(generationId: string) {
+  return requestEnhancement("upscale", generationId);
+}
+
+export async function requestAudio(generationId: string) {
+  return requestEnhancement("audio", generationId);
+}
+
+/**
+ * Removes a panel image from the project's storage folder. Refused while a
+ * render that uses it hasn't started yet, since the job still needs to read it.
+ */
+export async function deletePanel(projectId: string, path: string): Promise<ActionResult<{ deleted: true }>> {
   const { authUserId } = await requireCurrentUser();
-  try {
-    await enforceRateLimit("aiUtility", authUserId);
-  } catch (err) {
-    if (err instanceof RateLimitError) return { error: err.message };
-    throw err;
+  if (!isOwnSourcePath(path, authUserId) || !path.startsWith(`${authUserId}/${projectId}/`)) {
+    return { error: NOT_YOUR_PANEL };
   }
 
   const admin = createServiceRoleClient();
-  const { data: generation } = await admin
+  const { data: inUse } = await admin
     .from("generations")
-    .select("*")
-    .eq("id", generationId)
-    .eq("user_id", authUserId)
-    .single();
-
-  if (!generation || generation.status !== "completed") {
-    return { error: "Generation isn't ready for audio yet." };
+    .select("id")
+    .eq("source_image_url", path)
+    .in("status", ["pending", "processing"])
+    .limit(1);
+  if (inUse && inUse.length > 0) {
+    return { error: "This panel is being rendered — remove it once the render is done." };
   }
 
-  const creditsCost = calculateAudioCreditsCost(generation.duration_seconds);
-  const debit = await debitCredits(admin, authUserId, creditsCost, `AI sound for generation ${generationId}`);
-  if (!debit.ok) return { error: `Not enough credits. AI sound needs ${creditsCost}.` };
+  await deleteFromStorage(MANGA_SOURCES_BUCKET, [path]);
+  return { data: { deleted: true } };
+}
 
-  await generateAudioTask.trigger({ generationId, creditsCost });
-  return { data: { queued: true } };
+export async function getMyCreditsBalance(): Promise<number> {
+  const { authUserId } = await requireCurrentUser();
+  return getCreditsBalance(createServiceRoleClient(), authUserId);
 }
 
 export async function requestExportRatio(
   generationId: string,
   ratio: ExportRatio
-): Promise<ActionResult<{ queued: true }>> {
+): Promise<ActionResult<{ queued: true; creditsBalance: number }>> {
   const { authUserId } = await requireCurrentUser();
   try {
     await enforceRateLimit("export", authUserId);
@@ -252,12 +348,12 @@ export async function requestExportRatio(
   const admin = createServiceRoleClient();
   const { data: generation } = await admin
     .from("generations")
-    .select("id, status")
+    .select("id, status, progress")
     .eq("id", generationId)
     .eq("user_id", authUserId)
     .single();
 
-  if (!generation || generation.status !== "completed") {
+  if (!generation || !isGenerationFinalized(generation)) {
     return { error: "Generation isn't ready to export yet." };
   }
 
@@ -279,15 +375,22 @@ export async function requestExportRatio(
     return { error: error?.message ?? "Could not queue export." };
   }
 
-  await exportRatioTask.trigger({ generationExportId: exportRow.id });
-  return { data: { queued: true } };
+  try {
+    await exportRatioTask.trigger({ generationExportId: exportRow.id, creditsCost });
+  } catch (err) {
+    console.error("[editor] could not queue export", exportRow.id, err);
+    await failExport(admin, { exportId: exportRow.id, creditsCost, message: "Could not be queued" });
+    return { error: "Could not start the export. Your credits were refunded." };
+  }
+  return { data: { queued: true, creditsBalance: await getCreditsBalance(admin, authUserId) } };
 }
 
 export async function requestPanelExtraction(
   projectId: string,
   sourcePagePath: string
-): Promise<ActionResult<{ panelExtractionId: string }>> {
+): Promise<ActionResult<{ panelExtractionId: string; creditsBalance: number }>> {
   const { authUserId } = await requireCurrentUser();
+  if (!isOwnSourcePath(sourcePagePath, authUserId)) return { error: NOT_YOUR_PANEL };
   try {
     await enforceRateLimit("aiUtility", authUserId);
   } catch (err) {
@@ -296,13 +399,14 @@ export async function requestPanelExtraction(
   }
 
   const admin = createServiceRoleClient();
+  if (!(await ownsProject(admin, projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
   const creditsCost = calculatePanelExtractionCreditsCost();
   const debit = await debitCredits(admin, authUserId, creditsCost, `Panel split for project ${projectId}`);
   if (!debit.ok) return { error: `Not enough credits. Splitting a page needs ${creditsCost}.` };
 
   const { data: extraction, error } = await admin
     .from("panel_extractions")
-    .insert({ project_id: projectId, user_id: authUserId, source_page_url: sourcePagePath })
+    .insert({ project_id: projectId, user_id: authUserId, source_page_url: sourcePagePath, status: "pending" })
     .select("id")
     .single();
 
@@ -311,8 +415,16 @@ export async function requestPanelExtraction(
     return { error: error?.message ?? "Could not queue panel extraction." };
   }
 
-  await extractPanelsTask.trigger({ panelExtractionId: extraction.id });
-  return { data: { panelExtractionId: extraction.id } };
+  try {
+    await extractPanelsTask.trigger({ panelExtractionId: extraction.id, creditsCost });
+  } catch (err) {
+    console.error("[editor] could not queue panel extraction", extraction.id, err);
+    await failPanelExtraction(admin, { extractionId: extraction.id, creditsCost, message: "Could not be queued" });
+    return { error: "Could not start splitting this page. Your credits were refunded." };
+  }
+  return {
+    data: { panelExtractionId: extraction.id, creditsBalance: await getCreditsBalance(admin, authUserId) },
+  };
 }
 
 export async function getPanelExtractionResult(panelExtractionId: string): Promise<{
@@ -364,13 +476,13 @@ export async function getGenerationExports(generationId: string) {
 export async function startBatchGeneration({
   projectId,
   sourceImagePaths,
-  settings,
+  settings: requestedSettings,
 }: {
   projectId: string;
   sourceImagePaths: string[];
   settings: BatchGenerateSettings;
 }): Promise<ActionResult<{ batchId: string }>> {
-  const { authUserId } = await requireCurrentUser();
+  const { authUserId, profile } = await requireCurrentUser();
   try {
     await enforceRateLimit("generation", authUserId);
   } catch (err) {
@@ -378,16 +490,29 @@ export async function startBatchGeneration({
     throw err;
   }
 
+  if (!planAllows(profile?.plan, "batch")) return { error: upgradeMessage("batch") };
   if (sourceImagePaths.length === 0) return { error: "No panels to generate." };
+  if (!sourceImagePaths.every((path) => isOwnSourcePath(path, authUserId))) return { error: NOT_YOUR_PANEL };
+  if (!(await ownsProject(createServiceRoleClient(), projectId, authUserId))) return { error: NOT_YOUR_PROJECT };
 
+  const settings = normalizeRenderSettings(requestedSettings);
+  const locked = lockedRenderFeature(profile?.plan, settings);
+  if (locked) return { error: upgradeMessage(locked) };
   const batchId = crypto.randomUUID();
-  await batchGenerateTask.trigger({
-    batchId,
-    projectId,
-    userId: authUserId,
-    sourceImagePaths,
-    settings,
-  });
+  try {
+    // Credits are debited per panel inside the task, so a failure here costs nothing.
+    await batchGenerateTask.trigger({
+      batchId,
+      projectId,
+      userId: authUserId,
+      sourceImagePaths,
+      settings,
+      priority: queuePriorityFor(profile?.plan),
+    });
+  } catch (err) {
+    console.error("[editor] could not queue batch", batchId, err);
+    return { error: "Could not start the batch render. No credits were used." };
+  }
 
   revalidatePath(`/editor/${projectId}`);
   return { data: { batchId } };

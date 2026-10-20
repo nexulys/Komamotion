@@ -8,8 +8,9 @@ function ensureConfigured() {
 }
 
 // Real-ESRGAN-based video upscaler, served via fal.ai's queue API — same
-// async pattern as the main image-to-video job (see lib/ai/fal.ts).
-const UPSCALER_ENDPOINT: string = "fal-ai/video-upscaler";
+// async pattern as the main image-to-video job (see lib/ai/fal.ts). Renders
+// are 1080p, so ×2 gives a true 2160p (4K) file.
+const UPSCALER_ENDPOINT = "fal-ai/video-upscaler";
 
 export async function submitVideoUpscale({
   videoUrl,
@@ -24,7 +25,6 @@ export async function submitVideoUpscale({
     input: {
       video_url: videoUrl,
       scale: targetResolution === "4k" ? 2 : 1,
-      face_enhance: false,
     },
   });
 
@@ -45,8 +45,7 @@ export async function getVideoUpscaleStatus(externalJobId: string): Promise<{
 
   if (status.status === "COMPLETED") {
     const result = await fal.queue.result(UPSCALER_ENDPOINT, { requestId: externalJobId });
-    const data = result.data as { video?: { url?: string } };
-    return { status: "completed", videoUrl: data.video?.url };
+    return { status: "completed", videoUrl: result.data.video?.url };
   }
   if (status.status === "IN_PROGRESS") return { status: "processing" };
   if (status.status === "IN_QUEUE") return { status: "pending" };

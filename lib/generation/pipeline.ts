@@ -1,5 +1,13 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { RENDERED_VIDEOS_BUCKET, uploadBufferToStorage } from "@/lib/supabase/signed-url";
+import {
+  ENHANCEMENT_STALE_AFTER_MS,
+  enhancementPatch,
+  type EnhancementKind,
+  type EnhancementState,
+} from "@/lib/generation/enhancement-status";
+import { calculateCreditsCost } from "@/lib/stripe/credits";
+import { planHasWatermark } from "@/lib/stripe/plans";
 import type { CreditTransactionType, GenerationRow, GenerationStatus } from "@/lib/supabase/types";
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
@@ -88,6 +96,110 @@ export async function getCreditsBalance(admin: ServiceClient, userId: string) {
 }
 
 // ============================================================
+// On-demand 4K upscale / AI sound jobs — status lives on the generation row
+// (migration 0005) so the editor sees failures live and after a reload.
+// ============================================================
+
+/**
+ * Marks the job as running in a single conditional update, so two clicks
+ * racing each other can't both get through (and both be charged). Fails
+ * only while a non-stale job is already running.
+ */
+export async function claimEnhancement(
+  admin: ServiceClient,
+  { generationId, userId, kind }: { generationId: string; userId: string; kind: EnhancementKind }
+): Promise<boolean> {
+  const now = Date.now();
+  const staleBefore = new Date(now - ENHANCEMENT_STALE_AFTER_MS).toISOString();
+  const { data, error } = await admin
+    .from("generations")
+    .update(enhancementPatch(kind, "processing", new Date(now).toISOString()))
+    .eq("id", generationId)
+    .eq("user_id", userId)
+    .or(
+      [
+        `${kind}_status.is.null`,
+        `${kind}_status.neq.processing`,
+        `${kind}_requested_at.is.null`,
+        `${kind}_requested_at.lt."${staleBefore}"`,
+      ].join(",")
+    )
+    .select("id");
+  if (error) throw error;
+  return data.length > 0;
+}
+
+/** Puts a job's status back as it was before `claimEnhancement` (the debit was refused). */
+export async function releaseEnhancement(
+  admin: ServiceClient,
+  {
+    generationId,
+    kind,
+    previous,
+  }: { generationId: string; kind: EnhancementKind; previous: EnhancementState }
+) {
+  await admin
+    .from("generations")
+    .update(enhancementPatch(kind, previous.status, previous.requestedAt))
+    .eq("id", generationId);
+}
+
+/** Refunds a job's credits, then flags it failed — in that order, so the editor reads the refunded balance when the status change reaches it. */
+export async function failEnhancement(
+  admin: ServiceClient,
+  {
+    generationId,
+    userId,
+    kind,
+    creditsCost,
+    description,
+  }: { generationId: string; userId: string; kind: EnhancementKind; creditsCost: number; description: string }
+) {
+  await refundCredits(admin, { userId, amount: creditsCost, generationId, description });
+  await admin.from("generations").update(enhancementPatch(kind, "failed")).eq("id", generationId);
+}
+
+// ============================================================
+// Paid exports / panel splits — a definitive failure flips the row to
+// "failed" and refunds, conditionally, so a retried hook can't refund twice.
+// ============================================================
+
+export async function failExport(
+  admin: ServiceClient,
+  { exportId, creditsCost, message }: { exportId: string; creditsCost: number; message: string }
+) {
+  const { data } = await admin
+    .from("generation_exports")
+    .update({ status: "failed", error_message: message })
+    .eq("id", exportId)
+    .neq("status", "failed")
+    .select("user_id, generation_id");
+  const row = data?.[0];
+  if (!row || creditsCost <= 0) return;
+  await refundCredits(admin, {
+    userId: row.user_id,
+    amount: creditsCost,
+    generationId: row.generation_id,
+    description: "Refund for failed export",
+  });
+}
+
+export async function failPanelExtraction(
+  admin: ServiceClient,
+  { extractionId, creditsCost, message }: { extractionId: string; creditsCost: number; message: string }
+) {
+  const { data } = await admin
+    .from("panel_extractions")
+    .update({ status: "failed", error_message: message })
+    .eq("id", extractionId)
+    .neq("status", "failed")
+    .select("user_id");
+  const row = data?.[0];
+  if (!row || creditsCost <= 0) return;
+  await refundCredits(admin, { userId: row.user_id, amount: creditsCost, description: "Refund for failed panel split" });
+}
+
+// ============================================================
 // Render persistence — provider CDN URLs expire after a few days, so the
 // finished files are copied into our private bucket before the
 // generation is marked completed.
@@ -95,6 +207,16 @@ export async function getCreditsBalance(admin: ServiceClient, userId: string) {
 
 export function renderedVideoPath(generation: Pick<GenerationRow, "id" | "user_id" | "project_id">) {
   return `${generation.user_id}/${generation.project_id}/${generation.id}.mp4`;
+}
+
+/**
+ * Where an un-watermarked render waits for post-processing. Storage read
+ * access is scoped to the `${user_id}/` folder (migration 0002), so a file
+ * here can't be fetched by a free user who guesses the path; post-process
+ * writes the watermarked copy into their folder and deletes this one.
+ */
+export function unprocessedVideoPath(generation: Pick<GenerationRow, "id">) {
+  return `unprocessed/${generation.id}.mp4`;
 }
 
 async function mirrorRemoteFile(remoteUrl: string, path: string, fallbackContentType: string) {
@@ -137,9 +259,12 @@ export async function finalizeGenerationCompleted(
     return { generation: failed, transitioned: false };
   }
 
+  const { data: owner } = await admin.from("users").select("plan").eq("id", generation.user_id).maybeSingle();
+  const targetPath = planHasWatermark(owner?.plan) ? unprocessedVideoPath(generation) : renderedVideoPath(generation);
+
   // Throws on download/upload failure: the row stays "processing", so the
   // provider's webhook retry or the reconciliation cron tries again.
-  const videoPath = await mirrorRemoteFile(videoUrl, renderedVideoPath(generation), "video/mp4");
+  const videoPath = await mirrorRemoteFile(videoUrl, targetPath, "video/mp4");
 
   let thumbnailPath: string | null = generation.thumbnail_url;
   if (thumbnailUrl) {
@@ -204,6 +329,41 @@ export async function finalizeGenerationFailed(
   });
 
   return updated;
+}
+
+/**
+ * An optional pre-processing step (colorize / text removal) failed and the
+ * render goes ahead without it: refund what that option added to the price,
+ * and lower credits_cost so a later failure refund doesn't count it twice.
+ * `generation`'s colorize/remove_text flags mean "still charged for"; merge
+ * the returned patch back so a second failed option is priced correctly.
+ */
+export async function refundOptionSurcharge(
+  admin: ServiceClient,
+  generation: Pick<GenerationRow, "id" | "user_id" | "credits_cost" | "duration_seconds" | "resolution" | "colorize" | "remove_text">,
+  option: "colorize" | "removeText"
+): Promise<Pick<GenerationRow, "credits_cost" | "colorize" | "remove_text">> {
+  const charged = {
+    colorize: option === "colorize" ? false : generation.colorize,
+    remove_text: option === "removeText" ? false : generation.remove_text,
+  };
+  const without = calculateCreditsCost({
+    durationSeconds: generation.duration_seconds,
+    resolution: generation.resolution,
+    colorize: charged.colorize,
+    removeText: charged.remove_text,
+  });
+  const surcharge = generation.credits_cost - without;
+  if (surcharge <= 0) return { ...charged, credits_cost: generation.credits_cost };
+
+  await admin.from("generations").update({ credits_cost: without }).eq("id", generation.id);
+  await refundCredits(admin, {
+    userId: generation.user_id,
+    amount: surcharge,
+    generationId: generation.id,
+    description: option === "colorize" ? "Refund — colorization failed" : "Refund — text removal failed",
+  });
+  return { ...charged, credits_cost: without };
 }
 
 export async function setGenerationProgress(

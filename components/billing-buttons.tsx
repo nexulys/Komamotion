@@ -2,24 +2,37 @@
 
 import { useTransition } from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   createCheckoutSession,
   createCreditPackCheckout,
   createPortalSession,
+  type BillingActionResult,
 } from "@/app/(dashboard)/billing/actions";
+
+/** Success redirects to Stripe; only a failure comes back, as a message. */
+function runBillingAction(action: () => Promise<BillingActionResult>) {
+  return async () => {
+    const result = await action();
+    if (result?.error) toast.error(result.error);
+  };
+}
 
 export function SubscribeButton({
   planId,
   variant,
   currentPlan,
   purchasable = true,
+  hasSubscription = false,
 }: {
   planId: string;
   variant: "brand" | "outline";
   currentPlan: string | undefined;
   /** false for the free tier — it isn't a Stripe checkout target. */
   purchasable?: boolean;
+  /** Subscribers switch plans in the Stripe portal instead of a new checkout. */
+  hasSubscription?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
   const isCurrent = currentPlan === planId;
@@ -37,10 +50,10 @@ export function SubscribeButton({
       variant={variant}
       className="w-full"
       disabled={isPending || isCurrent}
-      onClick={() => startTransition(() => createCheckoutSession(planId))}
+      onClick={() => startTransition(runBillingAction(() => createCheckoutSession(planId)))}
     >
       {isPending && <Loader2 className="size-4 animate-spin" />}
-      {isCurrent ? "Current plan" : "Subscribe"}
+      {isCurrent ? "Current plan" : hasSubscription ? "Switch plan" : "Subscribe"}
     </Button>
   );
 }
@@ -51,7 +64,7 @@ export function BuyCreditPackButton() {
     <Button
       variant="outline"
       disabled={isPending}
-      onClick={() => startTransition(() => createCreditPackCheckout())}
+      onClick={() => startTransition(runBillingAction(createCreditPackCheckout))}
     >
       {isPending && <Loader2 className="size-4 animate-spin" />}
       Buy credit pack
@@ -65,7 +78,7 @@ export function ManageSubscriptionButton() {
     <Button
       variant="ghost"
       disabled={isPending}
-      onClick={() => startTransition(() => createPortalSession())}
+      onClick={() => startTransition(runBillingAction(createPortalSession))}
     >
       {isPending && <Loader2 className="size-4 animate-spin" />}
       Manage subscription

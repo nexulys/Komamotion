@@ -14,13 +14,14 @@ interface DetectedRegion {
 }
 
 const GROUNDING_ENDPOINT = "fal-ai/florence-2-large/caption-to-phrase-grounding";
-const INPAINT_ENDPOINT = "fal-ai/lama";
+// "fal-ai/lama" (used before) isn't a fal endpoint; Bria's eraser takes the same image + mask.
+const INPAINT_ENDPOINT = "fal-ai/bria/eraser";
 const DETECTION_PROMPT = "speech bubble, text balloon, onomatopoeia, sound effect text";
 
 /**
  * Detects speech bubbles / SFX text on a manga panel via open-vocabulary
- * grounding, then feeds a generated mask to a LaMa inpainting model to
- * erase them cleanly before the panel is animated.
+ * grounding, then feeds a generated mask to Bria's eraser to remove them
+ * cleanly before the panel is animated.
  */
 export async function removeTextFromPanel(imageUrl: string): Promise<{
   cleanedImageUrl: string;
@@ -36,15 +37,15 @@ export async function removeTextFromPanel(imageUrl: string): Promise<{
   const maskUrl = await buildMaskFromRegions(imageUrl, regions);
 
   const result = await fal.run(INPAINT_ENDPOINT, {
-    input: { image_url: imageUrl, mask_url: maskUrl },
+    input: { image_url: imageUrl, mask_url: maskUrl, mask_type: "manual" },
   });
 
-  const data = result.data as { image?: { url?: string } };
-  if (!data.image?.url) {
+  const cleanedImageUrl = result.data.image?.url;
+  if (!cleanedImageUrl) {
     throw new Error("Inpainting did not return an output image");
   }
 
-  return { cleanedImageUrl: data.image.url, regionsRemoved: regions.length };
+  return { cleanedImageUrl, regionsRemoved: regions.length };
 }
 
 async function detectTextRegions(imageUrl: string): Promise<DetectedRegion[]> {

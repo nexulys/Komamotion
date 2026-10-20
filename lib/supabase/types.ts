@@ -14,6 +14,8 @@ export type AiProvider = "fal" | "replicate";
 export type PlanId = "free" | "starter" | "studio" | "pro";
 export type ExportRatio = "16:9" | "9:16" | "1:1";
 export type ExportStatus = "pending" | "processing" | "completed" | "failed";
+/** On-demand 4K upscale / AI sound job on a generation; null = never requested. */
+export type EnhancementStatus = "processing" | "completed" | "failed";
 export type CreditTransactionType =
   | "subscription_grant"
   | "purchase"
@@ -87,6 +89,10 @@ export interface Database {
           cleaned_image_url: string | null;
           upscaled_video_url: string | null;
           audio_url: string | null;
+          upscale_status: EnhancementStatus | null;
+          upscale_requested_at: string | null;
+          audio_status: EnhancementStatus | null;
+          audio_requested_at: string | null;
           watermarked: boolean;
           export_ratio: ExportRatio;
           batch_id: string | null;

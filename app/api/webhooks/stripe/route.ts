@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe/server";
 import { getPlanByPriceId } from "@/lib/stripe/plans";
+import { planForSubscription } from "@/lib/stripe/subscription";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { addCreditsToBalance } from "@/lib/generation/pipeline";
 
@@ -102,15 +103,14 @@ export async function POST(request: Request) {
       const userId = subscription.metadata?.supabase_user_id;
       if (!userId) break;
 
-      const priceId = subscription.items.data[0]?.price.id;
-      const plan = getPlanByPriceId(priceId);
+      const plan = planForSubscription(subscription.status, subscription.items.data[0]?.price.id);
 
       await admin
         .from("users")
         .update({
           stripe_subscription_id: subscription.id,
           stripe_subscription_status: subscription.status,
-          ...(plan ? { plan: plan.id } : {}),
+          ...(plan ? { plan } : {}),
         })
         .eq("id", userId);
       break;
@@ -121,10 +121,13 @@ export async function POST(request: Request) {
       const userId = subscription.metadata?.supabase_user_id;
       if (!userId) break;
 
+      // Only the subscription the user is actually on can downgrade them —
+      // a stale one ending (e.g. replaced by a newer one) must not.
       await admin
         .from("users")
-        .update({ stripe_subscription_status: "canceled", plan: "starter" })
-        .eq("id", userId);
+        .update({ stripe_subscription_status: "canceled", plan: "free" })
+        .eq("id", userId)
+        .eq("stripe_subscription_id", subscription.id);
       break;
     }
 
@@ -134,7 +137,8 @@ export async function POST(request: Request) {
         typeof invoice.parent?.subscription_details?.subscription === "string"
           ? invoice.parent.subscription_details.subscription
           : undefined;
-      if (!subscriptionId) break;
+      // $0 invoices (trials, downgrade prorations) don't earn a credit grant.
+      if (!subscriptionId || invoice.amount_paid <= 0) break;
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       const userId = subscription.metadata?.supabase_user_id;

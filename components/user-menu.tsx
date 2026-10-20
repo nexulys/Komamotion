@@ -1,6 +1,6 @@
 "use client";
 
-import { Coins, LogOut, Settings } from "lucide-react";
+import { FolderKanban, LogOut, Settings, UserRound, Coins } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -44,9 +44,21 @@ export function UserMenu({
           <DropdownMenuLabel className="truncate">{label}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
+            <Link href="/projects">
+              <FolderKanban className="size-4" />
+              Projects
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
             <Link href="/billing">
               <Settings className="size-4" />
               Billing & credits
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link href="/account">
+              <UserRound className="size-4" />
+              Account
             </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />

@@ -58,9 +58,10 @@ function runFfmpeg(build: (cmd: ffmpeg.FfmpegCommand) => ffmpeg.FfmpegCommand, o
 }
 
 /**
- * Burns in a bottom-right "KomaMotion AI Free" watermark for free-tier
- * renders. Runs automatically as a post-processing step (see
- * trigger/post-process.ts) — never applied to paid plans.
+ * Free-tier finishing pass: downscales to at most 720p (the free plan's
+ * "720p preview") and burns in a bottom-right "KomaMotion AI Free"
+ * watermark. Runs automatically as a post-processing step (see
+ * trigger/post-process-generation.ts) — never applied to paid plans.
  */
 export async function applyWatermark(videoUrl: string, label = "KomaMotion AI Free"): Promise<Buffer> {
   return withTempDir(async (dir) => {
@@ -73,6 +74,9 @@ export async function applyWatermark(videoUrl: string, label = "KomaMotion AI Fr
         cmd
           .input(inputPath)
           .videoFilters([
+            // Height capped at 720 (never upscaled), width kept even for H.264; "\\," escapes
+            // the comma inside the expression for ffmpeg's filtergraph parser.
+            { filter: "scale", options: "-2:min(ih\\,720)" },
             {
               filter: "drawtext",
               options: {

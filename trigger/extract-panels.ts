@@ -2,11 +2,12 @@ import { logger, task } from "@trigger.dev/sdk";
 import { extractPanelsFromPage } from "@/lib/ai/panel-extraction";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { MANGA_SOURCES_BUCKET, createSignedUrl } from "@/lib/supabase/signed-url";
+import { failPanelExtraction } from "@/lib/generation/pipeline";
 
 export const extractPanelsTask = task({
   id: "extract-panels",
   retry: { maxAttempts: 3, minTimeoutInMs: 3000, maxTimeoutInMs: 30_000, factor: 2 },
-  run: async (payload: { panelExtractionId: string }) => {
+  run: async (payload: { panelExtractionId: string; creditsCost: number }) => {
     const admin = createServiceRoleClient();
 
     const { data: extraction } = await admin
@@ -40,12 +41,16 @@ export const extractPanelsTask = task({
 
       logger.info("Panel extraction complete", { id: extraction.id, count: panelPaths.length });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Panel extraction failed";
-      await admin
-        .from("panel_extractions")
-        .update({ status: "failed", error_message: message })
-        .eq("id", extraction.id);
+      // Rethrow so Trigger.dev retries; onFailure flags + refunds once retries run out.
+      logger.warn("Panel extraction attempt failed", { id: extraction.id, error: err instanceof Error ? err.message : String(err) });
       throw err;
     }
+  },
+  onFailure: async ({ payload, error }) => {
+    await failPanelExtraction(createServiceRoleClient(), {
+      extractionId: payload.panelExtractionId,
+      creditsCost: payload.creditsCost,
+      message: error instanceof Error ? error.message : "Panel extraction failed",
+    });
   },
 });

@@ -7,7 +7,7 @@ import {
   resolveMediaUrl,
   uploadBufferToStorage,
 } from "@/lib/supabase/signed-url";
-import { refundCredits } from "@/lib/generation/pipeline";
+import { failEnhancement } from "@/lib/generation/pipeline";
 
 const MAX_POLLS = 40; // ~10 min ceiling at 15s intervals
 
@@ -30,8 +30,7 @@ export const upscaleGenerationTask = task({
       .single();
 
     if (!generation?.output_video_url) {
-      logger.error("No output video to upscale", { generationId: payload.generationId });
-      return;
+      throw new Error("No output video to upscale");
     }
 
     // Signed URL valid 2h — fal fetches the input as soon as the job starts.
@@ -54,7 +53,7 @@ export const upscaleGenerationTask = task({
 
         await admin
           .from("generations")
-          .update({ upscaled_video_url: path, resolution: "4k" })
+          .update({ upscaled_video_url: path, resolution: "4k", upscale_status: "completed" })
           .eq("id", generation.id);
 
         logger.info("Upscale complete", { generationId: generation.id });
@@ -79,10 +78,11 @@ export const upscaleGenerationTask = task({
       .single();
 
     if (generation) {
-      await refundCredits(admin, {
-        userId: generation.user_id,
-        amount: payload.creditsCost,
+      await failEnhancement(admin, {
         generationId: payload.generationId,
+        userId: generation.user_id,
+        kind: "upscale",
+        creditsCost: payload.creditsCost,
         description: "Refund for failed 4K upscale",
       });
     }
