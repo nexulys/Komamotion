@@ -224,7 +224,7 @@ describe("plan features", () => {
       expect((await actions.requestUpscale("g1")).error).toMatch(/4K upscaling/);
       expect(balance()).toBe(50);
     }
-    seed({ plan: "studio" });
+    seed({ plan: "studio", balance: 500 });
     expect((await start({ resolution: "4k", colorize: true, removeText: true })).error).toBeUndefined();
   });
 

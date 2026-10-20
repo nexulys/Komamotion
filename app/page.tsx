@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 import { NexulysBadge } from "@/components/branding/nexulys-badge";
 import { ALL_PLANS } from "@/lib/stripe/plans";
+import { formatVideoDuration, seconds1080pFor } from "@/lib/stripe/credits";
 
 const steps = [
   {
@@ -154,8 +155,8 @@ export default function Home() {
               Pay for the minutes you generate
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-muted-foreground">
-              Every plan includes a monthly pool of render credits. 1 credit ≈
-              1 second of generated video.
+              Every plan includes a monthly pool of render credits. A second of
+              video costs 3 credits in 1080p, 12 in 4K.
             </p>
           </div>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -186,6 +187,9 @@ export default function Home() {
                 <CardContent className="space-y-3">
                   <p className="text-sm font-medium text-foreground">
                     {plan.credits.toLocaleString()} credits {plan.stripePriceId ? "/ mo" : "on signup"}
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      ≈ {formatVideoDuration(seconds1080pFor(plan.credits))} of 1080p video
+                    </span>
                   </p>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     {plan.features.map((f) => (

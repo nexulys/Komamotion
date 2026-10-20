@@ -31,7 +31,7 @@ export default function TermsPage() {
       <section>
         <h2>3. Crédits</h2>
         <ul>
-          <li>Chaque rendu consomme des crédits, affichés avant le lancement (1 crédit ≈ 1 seconde de vidéo en 1080p ; la 4K et certaines options coûtent davantage).</li>
+          <li>Chaque rendu consomme des crédits, affichés avant le lancement (une seconde de vidéo coûte 3 crédits en 1080p et 12 en 4K ; certaines options coûtent davantage).</li>
           <li>Les crédits sont débités au lancement. Si un rendu, un export, un découpage ou une option échoue, les crédits correspondants sont recrédités automatiquement.</li>
           <li>Le compte gratuit reçoit {FREE_PLAN.credits} crédits à l&apos;inscription ; ses vidéos sont limitées au 720p et portent un filigrane.</li>
           <li>Les crédits n&apos;ont pas de valeur monétaire, ne sont ni cessibles ni remboursables, sauf disposition contraire ci-dessous ou obligation légale.</li>

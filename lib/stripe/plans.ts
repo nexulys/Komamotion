@@ -21,8 +21,8 @@ export type Plan = {
 };
 
 /**
- * 1 credit == 1 second of rendered output video at 1080p.
- * 4K renders consume credits at 2x the 1080p rate (see lib/stripe/credits.ts).
+ * A second of rendered video costs 3 credits at 1080p and 12 in 4K (see
+ * CREDITS_PER_SECOND in lib/stripe/credits.ts).
  */
 export const FREE_PLAN: Plan = {
   id: "free",

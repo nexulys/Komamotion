@@ -141,12 +141,17 @@ Vercel → variables (type **Config**) — elles remplissent automatiquement le 
 
 ## 9. Vérifier la rentabilité
 
-1 crédit ≈ 1 seconde de vidéo 1080p. Revenu par crédit : Starter ≈ 0,032 $,
-Studio ≈ 0,025 $, Pro ≈ 0,021 $. Comparer avec les tarifs fal.ai réels (page du
-modèle `fal-ai/ltx-2.3/image-to-video/fast` en 1080p et 2160p, Flux Kontext par image,
-video-upscaler) : si une seconde coûte plus cher que ce qu'elle rapporte, ajuster
-les prix ou les crédits (`lib/stripe/plans.ts`, `lib/stripe/credits.ts`) et les
-estimations du tableau admin (`lib/ai/costs.ts`).
+Grille actuelle (`lib/stripe/credits.ts`) : une seconde de vidéo coûte **3 crédits en
+1080p** et **12 crédits en 4K**, pour un coût fal.ai d'environ 0,04 $/s en 1080p et
+0,16 $/s en 4K (LTX-2.3 fast, prix catalogue d'octobre 2026). Marge brute par seconde
+rendue, avant frais Stripe : Starter ≈ 58 %, Studio ≈ 46 %, Pro ≈ 37 % (les crédits
+non utilisés l'augmentent). Le compte gratuit coûte environ 0,24 $ par inscription
+(une vidéo de 6 s).
+
+À faire une fois fal.ai branché : comparer ces chiffres avec ta facture réelle
+(Billing sur fal.ai) et le tableau Admin → Overview, et vérifier le prix de
+`fal-ai/video-upscaler` (l'upscale 4K est facturé 1,5 crédit par seconde). Si un
+prix change, ajuster `CREDITS_PER_SECOND` (et les estimations de `lib/ai/costs.ts`).
 
 ## 10. Test final (dans cet ordre)
 

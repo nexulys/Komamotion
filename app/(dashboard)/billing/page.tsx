@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Coins, Sparkles, XCircle } from "lucide-re
 import { requireCurrentUser, getCreditTransactions } from "@/lib/supabase/queries";
 import { ALL_PLANS, CREDIT_PACK, getPlanById } from "@/lib/stripe/plans";
 import { isEntitledStatus } from "@/lib/stripe/subscription";
+import { formatVideoDuration, seconds1080pFor } from "@/lib/stripe/credits";
 import {
   Card,
   CardContent,
@@ -102,6 +103,9 @@ export default async function BillingPage({
               <CardContent className="space-y-3">
                 <p className="text-sm font-medium">
                   {plan.credits.toLocaleString()} credits {plan.stripePriceId ? "/ mo" : "on signup"}
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    ≈ {formatVideoDuration(seconds1080pFor(plan.credits))} of 1080p video
+                  </span>
                 </p>
                 <ul className="space-y-2 text-sm text-muted-foreground">
                   {plan.features.map((f) => (
