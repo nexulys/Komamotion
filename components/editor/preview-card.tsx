@@ -18,6 +18,8 @@ export function PreviewCard({
   renderingGeneration,
   latestCompleted,
   latestCompletedExports,
+  viewingOlder = false,
+  onShowLatest,
   selectedPanel,
   pendingActions,
   onUpscale,
@@ -29,6 +31,9 @@ export function PreviewCard({
   renderingGeneration: GenerationRow | null;
   latestCompleted: GenerationRow | null;
   latestCompletedExports: GenerationExportRow[];
+  /** True when the user picked an older render from the history. */
+  viewingOlder?: boolean;
+  onShowLatest?: () => void;
   selectedPanel: MangaPanel | null;
   pendingActions: Record<string, boolean>;
   onUpscale: (generationId: string) => void;
@@ -38,8 +43,13 @@ export function PreviewCard({
 }) {
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base">2. Preview</CardTitle>
+        {viewingOlder && onShowLatest && (
+          <button type="button" onClick={onShowLatest} className="text-xs text-primary hover:underline">
+            Back to latest
+          </button>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         {renderingGeneration ? (
@@ -51,9 +61,10 @@ export function PreviewCard({
         ) : latestCompleted?.output_video_url ? (
           <>
             <VideoPlayer
+              key={latestCompleted.id}
               src={latestCompleted.output_video_url}
               poster={latestCompleted.thumbnail_url}
-              downloadFileName={`${projectTitle.replace(/\s+/g, "-").toLowerCase()}.mp4`}
+              downloadFileName={`${projectTitle.replace(/\s+/g, "-").toLowerCase()}-${latestCompleted.id.slice(0, 8)}.mp4`}
             />
             <GenerationActions
               generation={latestCompleted}

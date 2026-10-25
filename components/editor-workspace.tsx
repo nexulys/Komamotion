@@ -78,10 +78,14 @@ export function EditorWorkspace({
   const [localCredits, setLocalCredits] = useState(credits);
   const [exportsByGeneration, setExportsByGeneration] = useState<Record<string, GenerationExportRow[]>>({});
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({});
+  // A finished render picked from the history; null shows the latest one.
+  const [viewedGenerationId, setViewedGenerationId] = useState<string | null>(null);
 
   const selectedPanel = panels.find((p) => p.id === selectedPanelId) ?? null;
   const latestGeneration = generations[0] ?? null;
   const latestCompleted = generations.find((g) => g.status === "completed") ?? null;
+  const viewedGeneration = generations.find((g) => g.id === viewedGenerationId && g.status === "completed") ?? null;
+  const shownCompleted = viewedGeneration ?? latestCompleted;
   const renderingGeneration =
     latestGeneration && latestGeneration.status !== "completed" && latestGeneration.status !== "failed"
       ? latestGeneration
@@ -221,6 +225,7 @@ export function EditorWorkspace({
 
       // Realtime may already have added this row if its event beat our response.
       setGenerations((prev) => (prev.some((g) => g.id === generation.id) ? prev : [generation, ...prev]));
+      setViewedGenerationId(null); // follow the new render's progress
       void refreshCredits();
       toast.info("Render started — this usually takes 30–90 seconds.");
     } finally {
@@ -349,14 +354,14 @@ export function EditorWorkspace({
     });
   }
 
-  const latestCompletedId = latestCompleted?.id;
+  const shownCompletedId = shownCompleted?.id;
   useEffect(() => {
-    if (latestCompletedId) {
-      getGenerationExports(latestCompletedId).then((rows) =>
-        setExportsByGeneration((prev) => ({ ...prev, [latestCompletedId]: rows }))
+    if (shownCompletedId) {
+      getGenerationExports(shownCompletedId).then((rows) =>
+        setExportsByGeneration((prev) => ({ ...prev, [shownCompletedId]: rows }))
       );
     }
-  }, [latestCompletedId]);
+  }, [shownCompletedId]);
 
   return (
     <div className="mx-auto grid max-w-7xl gap-8 px-6 py-8 lg:grid-cols-[1fr_380px]">
@@ -383,9 +388,11 @@ export function EditorWorkspace({
 
         <PreviewCard
           projectTitle={project.title}
-          renderingGeneration={renderingGeneration}
-          latestCompleted={latestCompleted}
-          latestCompletedExports={latestCompleted ? exportsByGeneration[latestCompleted.id] ?? [] : []}
+          renderingGeneration={viewedGeneration ? null : renderingGeneration}
+          latestCompleted={shownCompleted}
+          latestCompletedExports={shownCompleted ? exportsByGeneration[shownCompleted.id] ?? [] : []}
+          viewingOlder={viewedGeneration !== null && viewedGeneration.id !== latestCompleted?.id}
+          onShowLatest={() => setViewedGenerationId(null)}
           selectedPanel={selectedPanel}
           pendingActions={pendingActions}
           onUpscale={(generationId) => handleEnhancement("upscale", generationId)}
@@ -394,7 +401,14 @@ export function EditorWorkspace({
           canUpscale={planAllows(plan, "upscale")}
         />
 
-        {generations.length > 0 && <RenderHistoryCard generations={generations} />}
+        {generations.length > 0 && (
+          <RenderHistoryCard
+            generations={generations}
+            viewedId={renderingGeneration && !viewedGeneration ? null : shownCompleted?.id ?? null}
+            onView={setViewedGenerationId}
+            showModel={isAdmin}
+          />
+        )}
       </div>
 
       <div className="space-y-6">

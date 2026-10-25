@@ -100,6 +100,31 @@ export async function applyWatermark(videoUrl: string, label = "KomaMotion AI Fr
 }
 
 /**
+ * Poster frame for a render (project cards, history, video player):
+ * a 640px-wide JPEG taken 1 s in, or the first frame of very short clips.
+ * Accepts a URL or the video bytes already in memory.
+ */
+export async function extractThumbnail(source: string | Buffer): Promise<Buffer> {
+  return withTempDir(async (dir) => {
+    const inputPath = join(dir, "input.mp4");
+    const outputPath = join(dir, "thumb.jpg");
+    if (typeof source === "string") await downloadToFile(source, inputPath);
+    else await writeFile(inputPath, source);
+
+    const { durationSeconds } = await probeDimensions(inputPath);
+    await runFfmpeg(
+      (cmd) =>
+        cmd
+          .input(inputPath)
+          .inputOptions(["-ss", durationSeconds > 2 ? "1" : "0"])
+          .outputOptions(["-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4"]),
+      outputPath
+    );
+    return readFile(outputPath);
+  });
+}
+
+/**
  * Center-crops (then scales) a rendered video to a target aspect ratio for
  * multi-channel export: 16:9 (YouTube), 9:16 (TikTok/Reels/Shorts), 1:1
  * (Instagram feed).
