@@ -11,6 +11,13 @@ Tout se fait depuis un navigateur (téléphone compris).
 
 ---
 
+## 0. Hébergement payant (obligatoire pour vendre)
+
+- **Vercel** : l'offre gratuite (Hobby) interdit l'usage commercial. Passer en **Pro** (environ 20 $/mois)
+  avant d'encaisser le premier paiement (Vercel → Settings → Billing).
+- **Supabase** : l'offre gratuite est vite trop petite pour stocker des vidéos et met en pause les projets
+  inactifs. Prévoir **Pro** (environ 25 $/mois) dès les premiers clients.
+
 ## 1. Fusionner le code
 
 1. GitHub → Pull requests → la PR « KomaMotion production readiness » (#3).
@@ -19,10 +26,12 @@ Tout se fait depuis un navigateur (téléphone compris).
 
 ## 2. Supabase
 
-### 2.1 Migration
-SQL Editor → New query → coller le contenu de
-`supabase/migrations/0005_enhancement_job_status.sql` → **Run**.
-(Les migrations 0001 à 0004 sont déjà appliquées. Toutes peuvent être relancées sans risque.)
+### 2.1 Migrations
+SQL Editor → New query → coller le contenu de chaque fichier, l'un après l'autre → **Run** :
+1. `supabase/migrations/0005_enhancement_job_status.sql`
+2. `supabase/migrations/0006_episodes.sql` (les épisodes : chapitre → vidéo finie)
+
+(0001 à 0004 sont déjà appliquées. 0005 et 0006 peuvent être relancées sans risque.)
 
 ### 2.2 Adresses autorisées (sinon les e-mails pointent vers `localhost`)
 Authentication → URL Configuration :
@@ -45,7 +54,17 @@ Supabase et est très limité en nombre : **tes clients ne recevraient rien**.
 ### 2.4 Te donner les droits admin
 SQL Editor : `update public.users set is_admin = true where email = 'TON_EMAIL';`
 
-### 2.5 (Optionnel) Connexion Google
+### 2.5 Captcha anti-robots (recommandé avant toute publicité)
+Chaque inscription donne des crédits gratuits : sans captcha, un robot peut en créer des milliers.
+1. Cloudflare (compte gratuit) → **Turnstile** → Add widget → domaine `komamotion.vercel.app`
+   (et ton futur domaine) → copier la **Site Key** et la **Secret Key**.
+2. Supabase → Authentication → **Attack Protection** → activer *Captcha protection*, fournisseur
+   **Turnstile**, coller la **Secret Key**.
+3. Vercel → `NEXT_PUBLIC_TURNSTILE_SITE_KEY` = la **Site Key** (type Config) → redéployer.
+Les deux doivent être faits ensemble : si Supabase exige un captcha sans que le site l'affiche, plus
+personne ne peut se connecter.
+
+### 2.6 (Optionnel) Connexion Google
 Authentication → Providers → Google (nécessite un identifiant OAuth Google Cloud),
 puis Vercel : `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` = `true` (Config). Sans ça, le bouton reste masqué.
 
@@ -139,7 +158,20 @@ Vercel → variables (type **Config**) — elles remplissent automatiquement le 
 - Les textes ont été rédigés d'après le fonctionnement réel du site, mais ce ne sont
   pas des conseils juridiques : **les faire relire** par un professionnel.
 
-## 9. Vérifier la rentabilité
+## 9. Choisir le modèle vidéo (tests de qualité)
+
+Avant de lancer, vérifier que les vidéos sont belles sur **tes** pages de manga.
+1. Te mettre admin (étape 2.4) et t'ajouter des crédits (Admin → Users → sur ta ligne, saisir un nombre de crédits puis **Apply**).
+2. Ouvrir un projet : un sélecteur **Video model · admin test** apparaît dans les réglages
+   (visible seulement par les admins). Les clients ont toujours le modèle par défaut (LTX-2.3).
+3. Prendre 10 à 20 cases variées (noir et blanc, couleur, visages, action, décor) et rendre chacune avec
+   les 4 modèles. L'historique indique quel modèle a fait quel rendu.
+4. Noter pour chaque modèle : visages stables ? traits respectés ? texte qui fond ? mouvement naturel ?
+   Puis regarder le coût réel de chaque modèle dans la facturation fal.ai.
+5. Si un autre modèle est nettement meilleur, demande-moi de le passer par défaut : je réajusterai les prix
+   en fonction de son coût.
+
+## 10. Vérifier la rentabilité
 
 Grille actuelle (`lib/stripe/credits.ts`) : une seconde de vidéo coûte **3 crédits en
 1080p** et **12 crédits en 4K**, pour un coût fal.ai d'environ 0,04 $/s en 1080p et
@@ -153,7 +185,7 @@ non utilisés l'augmentent). Le compte gratuit coûte environ 0,24 $ par inscrip
 `fal-ai/video-upscaler` (l'upscale 4K est facturé 1,5 crédit par seconde). Si un
 prix change, ajuster `CREDITS_PER_SECOND` (et les estimations de `lib/ai/costs.ts`).
 
-## 10. Test final (dans cet ordre)
+## 11. Test final (dans cet ordre)
 
 1. Créer un compte avec une vraie adresse → l'e-mail de confirmation arrive.
 2. « Forgot password? » → l'e-mail arrive → nouveau mot de passe accepté.
@@ -166,3 +198,6 @@ prix change, ajuster `CREDITS_PER_SECOND` (et les estimations de `lib/ai/costs.t
 6. Manage subscription → résilier → à la fin de la période (ou via
    « Cancel immediately » en test) le compte repasse en Free.
 7. Account → supprimer un compte de test → il disparaît de Supabase et l'abonnement est annulé.
+8. Rendre 3 cases, puis carte **4. Build an episode** : les choisir dans l'ordre, ajouter un titre et un
+   sous-titre, format vertical → l'épisode arrive en une à deux minutes, lisible et téléchargeable.
+9. Importer une image explicite de test → le rendu est refusé avec un message, et les crédits reviennent.
