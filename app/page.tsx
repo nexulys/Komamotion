@@ -3,12 +3,15 @@ import { AccountDeletedNotice } from "@/components/account-deleted-notice";
 import Link from "next/link";
 import {
   ArrowRight,
+  Captions,
   Clapperboard,
-  Film,
-  Palette,
+  Eraser,
+  PenTool,
+  Scissors,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
   Wand2,
-  Zap,
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
@@ -27,43 +30,43 @@ import { formatVideoDuration, seconds1080pFor } from "@/lib/stripe/credits";
 
 const steps = [
   {
-    icon: Film,
-    title: "1. Import your panels",
+    icon: Scissors,
+    title: "1. Drop in your pages",
     description:
-      "Drag and drop manga pages or individual cases — black & white or color, single page or full chapter.",
+      "Upload pages or single panels. KomaMotion splits pages into panels and can erase speech bubbles before animating.",
   },
   {
     icon: Wand2,
-    title: "2. AI motion & color",
+    title: "2. Animate each panel",
     description:
-      "KomaMotion detects panels, applies optional dynamic colorization, and generates fluid image-to-video motion.",
+      "Choose the camera move and intensity, render 6–10 s clips in 1080p or 4K, colorize black & white art if you like.",
   },
   {
     icon: Clapperboard,
-    title: "3. Preview & export",
+    title: "3. Get a finished episode",
     description:
-      "Fine-tune camera movement, intensity and FPS, then export in MP4 up to 4K for your webtoon or trailer.",
+      "Put the clips in order, add a title card and captions, and download one vertical video ready for TikTok, Reels or Shorts.",
   },
 ];
 
 const features = [
   {
-    icon: Sparkles,
-    title: "Image-to-Video AI",
+    icon: Smartphone,
+    title: "Made for vertical video",
     description:
-      "Built on state-of-the-art diffusion video models for smooth, believable motion from a single still frame.",
+      "Episodes come out in 9:16 with each panel kept whole over a soft blurred fill — or 16:9 and 1:1 for YouTube and Instagram.",
   },
   {
-    icon: Palette,
-    title: "Dynamic colorization",
+    icon: Captions,
+    title: "Titles & captions built in",
     description:
-      "Optional AI colorization pass for black & white manga, tuned to preserve linework and shading.",
+      "Add a title card and a line of dialogue or narration per panel; they're burned into the video, no editing app needed.",
   },
   {
-    icon: Zap,
-    title: "No timeouts, ever",
+    icon: Eraser,
+    title: "Manga-aware cleanup",
     description:
-      "Generation runs on a durable async job queue — close the tab, come back, your render keeps going.",
+      "Page splitting, speech-bubble removal and optional colorization prepare panels so the motion looks right.",
   },
 ];
 
@@ -85,18 +88,18 @@ export default function Home() {
               <NexulysBadge />
             </div>
             <h1 className="mx-auto max-w-3xl text-4xl font-semibold tracking-tight sm:text-6xl">
-              Bring your manga panels{" "}
-              <span className="brand-gradient-text">to life</span>
+              Turn your manga chapter into a{" "}
+              <span className="brand-gradient-text">video ready to post</span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-              KomaMotion AI transforms static manga pages and webtoon panels
-              into fluid, cinematic video sequences — powered by image-to-video
-              generation built for studios and creators.
+              For manga and webtoon creators promoting their own series: animate your panels with AI, then
+              get one vertical episode with titles and captions — for TikTok, Reels and Shorts, without an
+              editing app or a motion designer.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" variant="brand">
                 <Link href="/register">
-                  Start animating free <ArrowRight className="size-4" />
+                  Make your first episode free <ArrowRight className="size-4" />
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
@@ -112,7 +115,7 @@ export default function Home() {
               Workflow
             </Badge>
             <h2 className="text-3xl font-semibold tracking-tight">
-              From still panel to motion in three steps
+              From your pages to a postable episode in three steps
             </h2>
           </div>
           <div className="grid gap-6 md:grid-cols-3">
@@ -143,6 +146,31 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-6 py-16">
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card className="glass-panel">
+              <CardHeader>
+                <PenTool className="mb-2 size-6 text-primary" />
+                <CardTitle>Built for people who own their story</CardTitle>
+                <CardDescription>
+                  Independent mangaka, webtoon artists and small publishers use KomaMotion to make trailers and
+                  recap episodes of their own series — the promo videos that used to cost a motion designer&apos;s day.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+            <Card className="glass-panel">
+              <CardHeader>
+                <ShieldCheck className="mb-2 size-6 text-primary" />
+                <CardTitle>Your work stays yours</CardTitle>
+                <CardDescription>
+                  You keep the rights to what you upload and what you make. Only upload pages you created or have
+                  permission to adapt — published manga is protected by copyright.
+                </CardDescription>
+              </CardHeader>
+            </Card>
           </div>
         </section>
 

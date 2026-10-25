@@ -23,7 +23,7 @@ export default function OpenGraphImage() {
       >
         <div style={{ fontSize: 28, color: "#c4b5fd", letterSpacing: 4 }}>A NEXULYS SAAS</div>
         <div style={{ fontSize: 88, fontWeight: 700, marginTop: 16 }}>KomaMotion AI</div>
-        <div style={{ fontSize: 40, color: "#d4d4d8", marginTop: 12 }}>Turn manga panels into cinematic video.</div>
+        <div style={{ fontSize: 40, color: "#d4d4d8", marginTop: 12 }}>Your manga chapter, ready to post.</div>
       </div>
     ),
     size

@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 const DESCRIPTION =
-  "KomaMotion AI turns static manga panels into fluid, cinematic video sequences with image-to-video AI. A Nexulys SaaS.";
+  "Turn your manga or webtoon chapter into a vertical video ready for TikTok, Reels and Shorts: AI-animated panels, titles and captions. A Nexulys SaaS.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
@@ -28,13 +28,13 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE.name,
-    title: "KomaMotion AI — Manga panels to cinematic video",
+    title: "KomaMotion AI — Your manga chapter, ready to post",
     description: DESCRIPTION,
     url: "/",
   },
   twitter: {
     card: "summary_large_image",
-    title: "KomaMotion AI — Manga panels to cinematic video",
+    title: "KomaMotion AI — Your manga chapter, ready to post",
     description: DESCRIPTION,
   },
 };
