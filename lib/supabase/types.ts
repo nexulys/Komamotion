@@ -14,6 +14,9 @@ export type AiProvider = "fal" | "replicate";
 export type PlanId = "free" | "starter" | "studio" | "pro";
 export type ExportRatio = "16:9" | "9:16" | "1:1";
 export type ExportStatus = "pending" | "processing" | "completed" | "failed";
+export type EpisodeTransition = "cut" | "fade";
+/** One clip of an episode, in playback order (episodes.clips). */
+export type EpisodeClip = { generation_id: string; caption: string | null };
 /** On-demand 4K upscale / AI sound job on a generation; null = never requested. */
 export type EnhancementStatus = "processing" | "completed" | "failed";
 export type CreditTransactionType =
@@ -153,6 +156,32 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["panel_extractions"]["Row"]>;
         Relationships: [];
       };
+      episodes: {
+        Row: {
+          id: string;
+          project_id: string;
+          user_id: string;
+          title: string | null;
+          status: ExportStatus;
+          aspect_ratio: ExportRatio;
+          transition: EpisodeTransition;
+          clips: EpisodeClip[];
+          output_video_url: string | null;
+          thumbnail_url: string | null;
+          duration_seconds: number | null;
+          error_message: string | null;
+          created_at: string;
+          updated_at: string;
+          completed_at: string | null;
+        };
+        Insert: Partial<Database["public"]["Tables"]["episodes"]["Row"]> & {
+          project_id: string;
+          user_id: string;
+          clips: EpisodeClip[];
+        };
+        Update: Partial<Database["public"]["Tables"]["episodes"]["Row"]>;
+        Relationships: [];
+      };
       credit_transactions: {
         Row: {
           id: string;
@@ -194,5 +223,6 @@ export type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
 export type GenerationRow = Database["public"]["Tables"]["generations"]["Row"];
 export type GenerationExportRow = Database["public"]["Tables"]["generation_exports"]["Row"];
 export type PanelExtractionRow = Database["public"]["Tables"]["panel_extractions"]["Row"];
+export type EpisodeRow = Database["public"]["Tables"]["episodes"]["Row"];
 export type CreditTransactionRow =
   Database["public"]["Tables"]["credit_transactions"]["Row"];

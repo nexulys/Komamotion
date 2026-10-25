@@ -40,12 +40,14 @@ import {
 } from "@/lib/generation/enhancement-status";
 import { planAllows } from "@/lib/stripe/plans";
 import { DEFAULT_VIDEO_MODEL, type VideoModelId } from "@/lib/ai/video-models";
-import type { ExportRatio, GenerationExportRow, GenerationRow, PlanId, ProjectRow } from "@/lib/supabase/types";
+import { EpisodeCard } from "@/components/editor/episode-card";
+import type { EpisodeRow, ExportRatio, GenerationExportRow, GenerationRow, PlanId, ProjectRow } from "@/lib/supabase/types";
 
 export function EditorWorkspace({
   project,
   initialGenerations,
   initialPanels,
+  initialEpisodes = [],
   credits,
   userId,
   plan,
@@ -55,6 +57,8 @@ export function EditorWorkspace({
   initialGenerations: GenerationRow[];
   /** The project's images from storage (uploads + split panels), newest first. */
   initialPanels: MangaPanel[];
+  /** Episodes already built for this project, newest first. */
+  initialEpisodes?: EpisodeRow[];
   credits: number;
   userId: string;
   plan: PlanId;
@@ -409,6 +413,13 @@ export function EditorWorkspace({
             showModel={isAdmin}
           />
         )}
+
+        <EpisodeCard
+          projectId={project.id}
+          projectTitle={project.title}
+          renders={generations.filter((g) => g.status === "completed")}
+          initialEpisodes={initialEpisodes}
+        />
       </div>
 
       <div className="space-y-6">

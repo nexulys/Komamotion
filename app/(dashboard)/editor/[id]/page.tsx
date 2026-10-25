@@ -1,5 +1,11 @@
 import { notFound } from "next/navigation";
-import { requireCurrentUser, getProjectById, getGenerationsForProject, getProjectPanels } from "@/lib/supabase/queries";
+import {
+  requireCurrentUser,
+  getProjectById,
+  getGenerationsForProject,
+  getProjectEpisodes,
+  getProjectPanels,
+} from "@/lib/supabase/queries";
 import { EditorWorkspace } from "@/components/editor-workspace";
 
 export default async function EditorPage({
@@ -18,9 +24,10 @@ export default async function EditorPage({
   }
   if (!project) notFound();
 
-  const [generations, panels] = await Promise.all([
+  const [generations, panels, episodes] = await Promise.all([
     getGenerationsForProject(id, authUserId),
     getProjectPanels(id, authUserId),
+    getProjectEpisodes(id, authUserId),
   ]);
 
   return (
@@ -28,6 +35,7 @@ export default async function EditorPage({
       project={project}
       initialGenerations={generations}
       initialPanels={panels}
+      initialEpisodes={episodes}
       credits={profile?.credits_balance ?? 0}
       userId={authUserId}
       plan={profile?.plan ?? "free"}

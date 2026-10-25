@@ -47,9 +47,10 @@ async function getReferencedMangaSources(admin: ReturnType<typeof createServiceR
 }
 
 async function getReferencedRenderedVideos(admin: ReturnType<typeof createServiceRoleClient>) {
-  const [{ data: generationRows }, { data: exportRows }] = await Promise.all([
+  const [{ data: generationRows }, { data: exportRows }, { data: episodeRows }] = await Promise.all([
     admin.from("generations").select("output_video_url, thumbnail_url, upscaled_video_url, audio_url"),
     admin.from("generation_exports").select("video_url"),
+    admin.from("episodes").select("output_video_url, thumbnail_url"),
   ]);
 
   const referenced = new Set<string>();
@@ -61,6 +62,10 @@ async function getReferencedRenderedVideos(admin: ReturnType<typeof createServic
   }
   for (const row of exportRows ?? []) {
     if (row.video_url) referenced.add(row.video_url);
+  }
+  for (const row of episodeRows ?? []) {
+    if (row.output_video_url) referenced.add(row.output_video_url);
+    if (row.thumbnail_url) referenced.add(row.thumbnail_url);
   }
   return referenced;
 }

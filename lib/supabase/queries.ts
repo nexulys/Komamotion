@@ -8,7 +8,7 @@ import {
 } from "@/lib/supabase/signed-url";
 import type { MangaPanel } from "@/components/manga-uploader";
 import { isGenerationFinalized } from "@/lib/generation/status";
-import type { GenerationRow, UserRow } from "@/lib/supabase/types";
+import type { EpisodeRow, GenerationRow, UserRow } from "@/lib/supabase/types";
 
 /**
  * `source_image_url` / `output_video_url` / `thumbnail_url` may hold either
@@ -177,6 +177,26 @@ export async function getProjectPanels(projectId: string, userId: string): Promi
       url: s.signedUrl,
       name: s.path.split("/").pop()!.replace(UUID_PREFIX, ""),
     }));
+}
+
+/** Signed URLs for an episode's video and poster (the columns hold storage paths). */
+export async function resolveEpisodeMedia(episode: EpisodeRow): Promise<EpisodeRow> {
+  const [video, thumbnail] = await Promise.all([
+    resolveMediaUrl(RENDERED_VIDEOS_BUCKET, episode.output_video_url),
+    resolveMediaUrl(RENDERED_VIDEOS_BUCKET, episode.thumbnail_url),
+  ]);
+  return { ...episode, output_video_url: video, thumbnail_url: thumbnail };
+}
+
+export async function getProjectEpisodes(projectId: string, userId: string): Promise<EpisodeRow[]> {
+  const { data } = await createServiceRoleClient()
+    .from("episodes")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  return Promise.all((data ?? []).map(resolveEpisodeMedia));
 }
 
 export async function getCreditTransactions(userId: string, limit = 20) {
