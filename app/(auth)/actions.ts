@@ -10,6 +10,17 @@ export type AuthActionState = {
   message?: string;
 } | null;
 
+/** Turnstile token from the form, when captcha is configured (see components/turnstile.tsx). */
+function captchaToken(formData: FormData) {
+  const token = formData.get("cf-turnstile-response");
+  return typeof token === "string" && token ? token : undefined;
+}
+
+const CAPTCHA_ERROR = "Please complete the security check and try again.";
+function authErrorMessage(message: string) {
+  return message.toLowerCase().includes("captcha") ? CAPTCHA_ERROR : message;
+}
+
 /** Public origin for links in auth emails: the configured app URL first, so they never point at a preview host. */
 async function siteOrigin() {
   const h = await headers();
@@ -25,10 +36,14 @@ export async function login(
   const next = safeNextPath(String(formData.get("next") ?? ""));
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+    options: { captchaToken: captchaToken(formData) },
+  });
 
   if (error) {
-    return { error: error.message };
+    return { error: authErrorMessage(error.message) };
   }
 
   redirect(next);
@@ -50,11 +65,12 @@ export async function register(
     options: {
       data: { full_name: displayName },
       emailRedirectTo: `${origin}/callback`,
+      captchaToken: captchaToken(formData),
     },
   });
 
   if (error) {
-    return { error: error.message };
+    return { error: authErrorMessage(error.message) };
   }
 
   redirect("/login?registered=1");
@@ -86,10 +102,12 @@ export async function requestPasswordReset(
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${await siteOrigin()}/callback?next=/reset-password`,
+    captchaToken: captchaToken(formData),
   });
   // Rate limits are worth surfacing; anything else gets the same answer
   // whether or not the account exists, so this can't be used to probe emails.
   if (error?.status === 429) return { error: "Too many requests — please wait a few minutes and try again." };
+  if (error?.message?.toLowerCase().includes("captcha")) return { error: CAPTCHA_ERROR };
 
   return { message: "If an account exists for that email, a reset link is on its way. Check your inbox (and spam)." };
 }

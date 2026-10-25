@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { register, signInWithGoogle } from "@/app/(auth)/actions";
 import { FREE_PLAN } from "@/lib/stripe/plans";
 import { Button } from "@/components/ui/button";
+import { Turnstile } from "@/components/turnstile";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -45,6 +46,7 @@ export default function RegisterPage() {
             <Label htmlFor="password">Password</Label>
             <Input id="password" name="password" type="password" minLength={8} required />
           </div>
+          <Turnstile resetKey={state} />
           {state?.error && (
             <p className="text-sm text-destructive">{state.error}</p>
           )}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { requestPasswordReset } from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
+import { Turnstile } from "@/components/turnstile";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +30,7 @@ export default function ForgotPasswordPage() {
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" placeholder="you@studio.com" required />
             </div>
+            <Turnstile resetKey={state} />
             {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
             <Button type="submit" variant="brand" className="w-full" disabled={isPending}>
               {isPending && <Loader2 className="size-4 animate-spin" />}

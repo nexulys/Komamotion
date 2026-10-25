@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { login, signInWithGoogle } from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
+import { Turnstile } from "@/components/turnstile";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -74,6 +75,7 @@ function LoginForm() {
             </div>
             <Input id="password" name="password" type="password" autoComplete="current-password" required />
           </div>
+          <Turnstile resetKey={state} />
           {state?.error && (
             <p className="text-sm text-destructive">{state.error}</p>
           )}
