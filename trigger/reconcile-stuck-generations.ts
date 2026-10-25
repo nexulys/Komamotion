@@ -56,7 +56,8 @@ export const reconcileStuckGenerationsTask = schedules.task({
 
         const status = await getVideoGenerationStatus(
           generation.provider as AiProvider,
-          generation.external_job_id!
+          generation.external_job_id!,
+          generation.model
         );
 
         if (status.status === "completed") {

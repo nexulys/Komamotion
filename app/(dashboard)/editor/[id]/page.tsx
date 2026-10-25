@@ -31,6 +31,7 @@ export default async function EditorPage({
       credits={profile?.credits_balance ?? 0}
       userId={authUserId}
       plan={profile?.plan ?? "free"}
+      isAdmin={profile?.is_admin ?? false}
     />
   );
 }

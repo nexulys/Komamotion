@@ -28,6 +28,7 @@ import {
 } from "@/lib/generation/pipeline";
 import { getEnhancementState, type EnhancementKind } from "@/lib/generation/enhancement-status";
 import { normalizeRenderSettings } from "@/lib/ai/render-options";
+import { DEFAULT_VIDEO_MODEL, VIDEO_MODELS, type VideoModelId } from "@/lib/ai/video-models";
 import { isGenerationFinalized } from "@/lib/generation/status";
 import { lockedRenderFeature, planAllows, queuePriorityFor, upgradeMessage } from "@/lib/stripe/plans";
 import { generateVideoTask } from "@/trigger/generate-video";
@@ -78,10 +79,13 @@ export async function startGeneration({
   projectId,
   sourceImagePath,
   settings: requestedSettings,
+  modelId,
 }: {
   projectId: string;
   sourceImagePath: string;
   settings: AnimationSettingsValue & { removeText: boolean };
+  /** Admin-only model comparison; ignored for everyone else. */
+  modelId?: VideoModelId;
 }): Promise<ActionResult<GenerationRow>> {
   const { authUserId, profile } = await requireCurrentUser();
   if (!isOwnSourcePath(sourceImagePath, authUserId)) return { error: NOT_YOUR_PANEL };
@@ -89,6 +93,7 @@ export async function startGeneration({
   const settings = normalizeRenderSettings(requestedSettings);
   const locked = lockedRenderFeature(profile?.plan, settings);
   if (locked) return { error: upgradeMessage(locked) };
+  const model = profile?.is_admin && modelId && modelId in VIDEO_MODELS ? modelId : DEFAULT_VIDEO_MODEL;
 
   try {
     await enforceRateLimit("generation", authUserId);
@@ -127,6 +132,7 @@ export async function startGeneration({
       source_image_url: sourceImagePath,
       status: "pending",
       provider,
+      model,
       prompt: settings.prompt || null,
       camera_movement: settings.cameraMovement,
       motion_intensity: settings.motionIntensity,
@@ -184,7 +190,7 @@ export async function refreshGenerationStatus(generationId: string): Promise<Act
     return { data: generation };
   }
 
-  const status = await getVideoGenerationStatus(generation.provider, generation.external_job_id);
+  const status = await getVideoGenerationStatus(generation.provider, generation.external_job_id, generation.model);
   const admin = createServiceRoleClient();
 
   if (status.status === "completed") {

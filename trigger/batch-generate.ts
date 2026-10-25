@@ -2,6 +2,7 @@ import { logger, task } from "@trigger.dev/sdk";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { calculateCreditsCost } from "@/lib/stripe/credits";
 import { getDefaultProvider } from "@/lib/ai";
+import { DEFAULT_VIDEO_MODEL } from "@/lib/ai/video-models";
 import { estimateGenerationCostUsd } from "@/lib/ai/costs";
 import { deductCredits, finalizeGenerationFailed, refundCredits } from "@/lib/generation/pipeline";
 import type { CameraMovement, Resolution } from "@/lib/supabase/types";
@@ -80,6 +81,7 @@ export const batchGenerateTask = task({
           source_image_url: sourceImagePath,
           status: "pending",
           provider,
+          model: DEFAULT_VIDEO_MODEL,
           prompt: payload.settings.prompt || null,
           camera_movement: payload.settings.cameraMovement,
           motion_intensity: payload.settings.motionIntensity,

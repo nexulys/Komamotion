@@ -98,6 +98,7 @@ export const generateVideoTask = task({
           durationSeconds: generation.duration_seconds,
           colorize: generation.colorize,
           webhookUrl: getAiWebhookUrl(),
+          model: generation.model,
         },
         generation.provider
       );

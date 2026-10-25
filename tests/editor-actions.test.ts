@@ -182,6 +182,23 @@ describe("startGeneration", () => {
   });
 });
 
+describe("admin model choice", () => {
+  const start = (modelId?: "hailuo-02") =>
+    actions.startGeneration({ projectId: "p1", sourceImagePath: "u1/p1/panel.png", settings: SETTINGS, modelId });
+
+  it("lets an admin render with a comparison model", async () => {
+    seed();
+    h.db.tables.users[0].is_admin = true;
+    expect((await start("hailuo-02")).data?.model).toBe("hailuo-02");
+  });
+
+  it("always uses the default model for everyone else", async () => {
+    seed();
+    expect((await start("hailuo-02")).data?.model).toBe("ltx-2.3-fast");
+    expect((await start()).data?.model).toBe("ltx-2.3-fast");
+  });
+});
+
 describe("startBatchGeneration", () => {
   const batch = (paths = ["u1/p1/a.png", "u1/p1/b.png"], projectId = "p1") =>
     actions.startBatchGeneration({ projectId, sourceImagePaths: paths, settings: SETTINGS });

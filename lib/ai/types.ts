@@ -10,6 +10,8 @@ export interface ImageToVideoParams {
   durationSeconds: number;
   colorize: boolean;
   webhookUrl?: string;
+  /** VideoModelId stored on the generation; unknown/legacy values mean the default model. */
+  model?: string | null;
 }
 
 export interface AiJobHandle {
@@ -28,5 +30,5 @@ export interface AiJobStatus {
 export interface ImageToVideoConnector {
   provider: AiProvider;
   submit(params: ImageToVideoParams): Promise<AiJobHandle>;
-  getStatus(externalJobId: string): Promise<AiJobStatus>;
+  getStatus(externalJobId: string, model?: string | null): Promise<AiJobStatus>;
 }

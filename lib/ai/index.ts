@@ -22,9 +22,10 @@ export async function createVideoGeneration(
 
 export async function getVideoGenerationStatus(
   provider: AiProvider,
-  externalJobId: string
+  externalJobId: string,
+  model?: string | null
 ): Promise<AiJobStatus> {
-  return CONNECTORS[provider].getStatus(externalJobId);
+  return CONNECTORS[provider].getStatus(externalJobId, model);
 }
 
 export * from "@/lib/ai/types";

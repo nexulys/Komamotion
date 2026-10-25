@@ -39,6 +39,7 @@ import {
   type EnhancementKind,
 } from "@/lib/generation/enhancement-status";
 import { planAllows } from "@/lib/stripe/plans";
+import { DEFAULT_VIDEO_MODEL, type VideoModelId } from "@/lib/ai/video-models";
 import type { ExportRatio, GenerationExportRow, GenerationRow, PlanId, ProjectRow } from "@/lib/supabase/types";
 
 export function EditorWorkspace({
@@ -48,6 +49,7 @@ export function EditorWorkspace({
   credits,
   userId,
   plan,
+  isAdmin = false,
 }: {
   project: ProjectRow;
   initialGenerations: GenerationRow[];
@@ -56,6 +58,8 @@ export function EditorWorkspace({
   credits: number;
   userId: string;
   plan: PlanId;
+  /** Admins can pick a comparison video model (lib/ai/video-models.ts). */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -68,6 +72,7 @@ export function EditorWorkspace({
   const [isUploading, setIsUploading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [settings, setSettings] = useState<AnimationSettingsValue>(DEFAULT_SETTINGS);
+  const [videoModel, setVideoModel] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL);
   const [generations, setGenerations] = useState<GenerationRow[]>(initialGenerations);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localCredits, setLocalCredits] = useState(credits);
@@ -206,6 +211,7 @@ export function EditorWorkspace({
         projectId: project.id,
         sourceImagePath: selectedPanel.path,
         settings,
+        ...(isAdmin ? { modelId: videoModel } : {}),
       });
 
       if (error || !generation) {
@@ -400,6 +406,7 @@ export function EditorWorkspace({
           isSubmitting={isSubmitting}
           onGenerate={handleGenerate}
           plan={plan}
+          modelPicker={isAdmin ? { value: videoModel, onChange: setVideoModel } : undefined}
         />
       </div>
     </div>
