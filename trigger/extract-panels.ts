@@ -3,6 +3,7 @@ import { extractPanelsFromPage } from "@/lib/ai/panel-extraction";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { MANGA_SOURCES_BUCKET, createSignedUrl } from "@/lib/supabase/signed-url";
 import { failPanelExtraction } from "@/lib/generation/pipeline";
+import { assertImageAllowed, ContentRejectedError } from "@/lib/ai/moderation";
 
 export const extractPanelsTask = task({
   id: "extract-panels",
@@ -28,6 +29,16 @@ export const extractPanelsTask = task({
 
     try {
       const signedPageUrl = await createSignedUrl(MANGA_SOURCES_BUCKET, extraction.source_page_url);
+      try {
+        await assertImageAllowed(signedPageUrl);
+      } catch (err) {
+        if (err instanceof ContentRejectedError) {
+          logger.warn("Page rejected by moderation", { id: extraction.id, probability: err.probability });
+          await failPanelExtraction(admin, { extractionId: extraction.id, creditsCost: payload.creditsCost, message: err.message });
+          return;
+        }
+        throw err;
+      }
       const { panelPaths } = await extractPanelsFromPage({
         pageImageUrl: signedPageUrl,
         userId: extraction.user_id,

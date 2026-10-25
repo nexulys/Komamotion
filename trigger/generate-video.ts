@@ -2,6 +2,7 @@ import { logger, task } from "@trigger.dev/sdk";
 import { createVideoGeneration } from "@/lib/ai";
 import { removeTextFromPanel } from "@/lib/ai/inpainting";
 import { colorizePanel } from "@/lib/ai/colorize";
+import { assertImageAllowed, ContentRejectedError } from "@/lib/ai/moderation";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { MANGA_SOURCES_BUCKET, createSignedUrl } from "@/lib/supabase/signed-url";
 import { getAiWebhookUrl } from "@/lib/env";
@@ -46,6 +47,18 @@ export const generateVideoTask = task({
     await setGenerationProgress(generation.id, 10, { status: "processing" }, admin);
 
     let imageUrl = await createSignedUrl(MANGA_SOURCES_BUCKET, generation.source_image_url);
+
+    // Nothing goes to an AI model before passing moderation.
+    try {
+      await assertImageAllowed(imageUrl);
+    } catch (err) {
+      if (err instanceof ContentRejectedError) {
+        logger.warn("Source image rejected by moderation", { generationId: generation.id, probability: err.probability });
+        await finalizeGenerationFailed(generation.id, err.message, admin);
+        return;
+      }
+      throw err;
+    }
     // What the user is still charged for: an optional step that fails is
     // dropped from it and its surcharge refunded.
     const charged = { ...generation };
