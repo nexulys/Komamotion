@@ -230,7 +230,7 @@ export function EpisodeCard({
 
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2 sm:col-span-3">
-                <Label htmlFor="episode-title">3 · Title card (optional)</Label>
+                <Label htmlFor="episode-title">Title card (optional)</Label>
                 <Input
                   id="episode-title"
                   value={title}

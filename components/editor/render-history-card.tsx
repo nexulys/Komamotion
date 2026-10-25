@@ -54,7 +54,7 @@ export function RenderHistoryCard({
                 </span>
                 {showModel && <span className="block text-xs text-amber-400">{resolveVideoModel(g.model).label}</span>}
                 {g.status === "failed" && g.error_message && (
-                  <span className="block truncate text-xs text-destructive">{g.error_message}</span>
+                  <span className="block break-words text-xs text-destructive">{g.error_message}</span>
                 )}
               </span>
               <Badge

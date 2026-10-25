@@ -368,7 +368,7 @@ export function EditorWorkspace({
   }, [shownCompletedId]);
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-8 px-6 py-8 lg:grid-cols-[1fr_380px]">
+    <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-6">
         <EditorHeader project={project} credits={localCredits} />
 
