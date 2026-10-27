@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { SITE } from "@/lib/site-config";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,13 +15,28 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const DESCRIPTION =
+  "Turn your manga or webtoon chapter into a vertical video ready for TikTok, Reels and Shorts: AI-animated panels, titles and captions. A Nexulys SaaS.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE.url),
   title: {
     default: "KomaMotion AI — A Nexulys SaaS",
     template: "%s · KomaMotion AI",
   },
-  description:
-    "KomaMotion AI turns static manga panels into fluid, cinematic video sequences with image-to-video AI. A Nexulys SaaS.",
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: SITE.name,
+    title: "KomaMotion AI — Your manga chapter, ready to post",
+    description: DESCRIPTION,
+    url: "/",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "KomaMotion AI — Your manga chapter, ready to post",
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

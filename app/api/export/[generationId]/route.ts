@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { RENDERED_VIDEOS_BUCKET, resolveMediaUrl } from "@/lib/supabase/signed-url";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { isGenerationFinalized } from "@/lib/generation/status";
 
 /**
  * Streams a completed render back to the browser with a clean
@@ -35,12 +36,12 @@ export async function GET(
 
   const { data: generation, error } = await supabase
     .from("generations")
-    .select("output_video_url, status, project_id")
+    .select("output_video_url, status, progress, project_id")
     .eq("id", generationId)
     .eq("user_id", user.id)
     .single();
 
-  if (error || !generation || generation.status !== "completed" || !generation.output_video_url) {
+  if (error || !generation || !isGenerationFinalized(generation) || !generation.output_video_url) {
     return NextResponse.json({ error: "Export not available" }, { status: 404 });
   }
 

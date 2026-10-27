@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true, alreadyResolved: true });
   }
 
-  const status = await getVideoGenerationStatus(generation.provider as AiProvider, externalJobId);
+  const status = await getVideoGenerationStatus(generation.provider as AiProvider, externalJobId, generation.model);
 
   if (status.status === "completed") {
     try {

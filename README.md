@@ -54,6 +54,20 @@ supabase/
   migrations/       versioned SQL: schema, RLS, storage policies, Realtime
 ```
 
+## Going to production
+
+Step-by-step setup of every external service (Supabase auth/SMTP, fal.ai,
+Trigger.dev, Stripe, Upstash, legal identity) and where each environment
+variable goes: **[docs/MISE_EN_PRODUCTION.md](docs/MISE_EN_PRODUCTION.md)** (in French).
+
+## Checks
+
+```bash
+npm run typecheck && npm run lint && npm test && npm run build
+```
+
+CI runs the same on every pull request (`.github/workflows/ci.yml`).
+
 ## Getting started
 
 1. **Install dependencies**
@@ -128,8 +142,9 @@ step gets automatic retry with backoff (`trigger.config.ts`):
 
 ## Credits & plans
 
-1 credit ≈ 1 second of rendered 1080p video; 4K costs 2×, colorization adds
-25%, and text/bubble removal adds a flat surcharge (`lib/stripe/credits.ts`).
+A second of rendered video costs 3 credits in 1080p and 12 in 4K (priced off
+the provider's per-second cost), colorization adds 25%, and text/bubble
+removal adds a flat surcharge (`lib/stripe/credits.ts`).
 A **Free** tier (20 signup credits, watermarked, no Stripe subscription)
 sits alongside Starter/Studio/Pro; paid plans grant a monthly credit pool
 on `invoice.payment_succeeded` and never carry the watermark

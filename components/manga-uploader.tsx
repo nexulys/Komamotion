@@ -108,7 +108,9 @@ export function MangaUploader({
                       e.stopPropagation();
                       onRemove(panel.id);
                     }}
-                    className="absolute top-1.5 left-1.5 hidden size-5 items-center justify-center rounded-full bg-black/70 text-white group-hover:flex"
+                    aria-label={`Remove ${panel.name}`}
+                    // Always visible on touch-size screens (no hover there); on hover from sm up.
+                    className="absolute top-1.5 left-1.5 flex size-6 items-center justify-center rounded-full bg-black/70 text-white sm:hidden sm:size-5 sm:group-hover:flex"
                   >
                     <Trash2 className="size-3" />
                   </span>

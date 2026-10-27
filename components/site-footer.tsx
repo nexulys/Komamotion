@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "@/components/branding/logo";
 import { NexulysBadge } from "@/components/branding/nexulys-badge";
+import { SITE } from "@/lib/site-config";
 
 export function SiteFooter() {
   return (
@@ -14,7 +15,7 @@ export function SiteFooter() {
               cinematic video sequences with image-to-video AI.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-8 text-sm sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-8 text-sm sm:grid-cols-4">
             <div className="space-y-2">
               <p className="font-medium text-foreground">Product</p>
               <Link href="/projects" className="block text-muted-foreground hover:text-foreground">
@@ -32,6 +33,23 @@ export function SiteFooter() {
               <Link href="/register" className="block text-muted-foreground hover:text-foreground">
                 Create account
               </Link>
+            </div>
+            <div className="space-y-2">
+              <p className="font-medium text-foreground">Legal</p>
+              <Link href="/terms" className="block text-muted-foreground hover:text-foreground">
+                Terms
+              </Link>
+              <Link href="/privacy" className="block text-muted-foreground hover:text-foreground">
+                Privacy
+              </Link>
+              <Link href="/legal" className="block text-muted-foreground hover:text-foreground">
+                Legal notice
+              </Link>
+              {SITE.supportEmail && (
+                <a href={`mailto:${SITE.supportEmail}`} className="block text-muted-foreground hover:text-foreground">
+                  Contact
+                </a>
+              )}
             </div>
             <div className="space-y-2">
               <p className="font-medium text-foreground">Ecosystem</p>

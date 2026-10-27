@@ -77,6 +77,26 @@ export async function deleteFromStorage(bucket: string, paths: string[]) {
   await admin.storage.from(bucket).remove(paths);
 }
 
+/** Deletes everything under `${userId}/` in a bucket (files sit at user/project/file). */
+export async function deleteUserFolder(bucket: string, userId: string) {
+  const admin = createServiceRoleClient();
+  const storage = admin.storage.from(bucket);
+  const { data: entries } = await storage.list(userId, { limit: 1000 });
+  const paths: string[] = [];
+  for (const entry of entries ?? []) {
+    if (entry.id) {
+      paths.push(`${userId}/${entry.name}`);
+      continue;
+    }
+    const { data: files } = await storage.list(`${userId}/${entry.name}`, { limit: 1000 });
+    for (const file of files ?? []) if (file.id) paths.push(`${userId}/${entry.name}/${file.name}`);
+  }
+  for (let i = 0; i < paths.length; i += 100) {
+    await storage.remove(paths.slice(i, i + 100));
+  }
+  return paths.length;
+}
+
 /**
  * DB columns like `source_image_url` / `output_video_url` hold either a
  * full external URL (the AI provider's own CDN — used as-is) or a path

@@ -1,23 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Clapperboard,
-  Coins,
-  Download,
-  Layers,
-  Loader2,
-  Scissors,
-  Sparkles,
-  Volume2,
-  Wand2,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
+  deletePanel,
   getGeneration,
   getGenerationExports,
+  getMyCreditsBalance,
   getPanelExtractionResult,
   requestAudio,
   requestExportRatio,
@@ -27,83 +18,100 @@ import {
   startGeneration,
 } from "@/app/(dashboard)/editor/[id]/actions";
 import { useRealtimeGenerations } from "@/hooks/use-realtime-generations";
-import { MangaUploader, type MangaPanel } from "@/components/manga-uploader";
-import { AnimationSettings, type AnimationSettingsValue } from "@/components/animation-settings";
-import { VideoPlayer } from "@/components/video-player";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import type { ExportRatio, GenerationExportRow, GenerationRow, ProjectRow } from "@/lib/supabase/types";
-
-const DEFAULT_SETTINGS: AnimationSettingsValue = {
-  prompt: "",
-  cameraMovement: "zoom_in",
-  motionIntensity: 0.5,
-  fps: 24,
-  resolution: "1080p",
-  colorize: false,
-  removeText: false,
-  durationSeconds: 4,
-};
-
-const STATUS_LABEL: Record<GenerationRow["status"], string> = {
-  pending: "Queued",
-  processing: "Rendering…",
-  completed: "Completed",
-  failed: "Failed",
-};
-
-const EXPORT_RATIOS: ExportRatio[] = ["16:9", "9:16", "1:1"];
-const RATIO_LABEL: Record<ExportRatio, string> = {
-  "16:9": "YouTube (16:9)",
-  "9:16": "TikTok / Reels (9:16)",
-  "1:1": "Instagram (1:1)",
-};
+import { usePolling } from "@/hooks/use-polling";
+import type { MangaPanel } from "@/components/manga-uploader";
+import type { AnimationSettingsValue } from "@/components/animation-settings";
+import {
+  DEFAULT_SETTINGS,
+  ENHANCEMENT_MESSAGES,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  RATIO_LABEL,
+} from "@/components/editor/editor-constants";
+import { EditorHeader } from "@/components/editor/editor-header";
+import { PanelImportCard } from "@/components/editor/panel-import-card";
+import { PreviewCard } from "@/components/editor/preview-card";
+import { RenderHistoryCard } from "@/components/editor/render-history-card";
+import { SettingsPanel } from "@/components/editor/settings-panel";
+import {
+  enhancementPatch,
+  getEnhancementState,
+  type EnhancementKind,
+} from "@/lib/generation/enhancement-status";
+import { planAllows } from "@/lib/stripe/plans";
+import { DEFAULT_VIDEO_MODEL, type VideoModelId } from "@/lib/ai/video-models";
+import { EpisodeCard } from "@/components/editor/episode-card";
+import type { EpisodeRow, ExportRatio, GenerationExportRow, GenerationRow, PlanId, ProjectRow } from "@/lib/supabase/types";
 
 export function EditorWorkspace({
   project,
   initialGenerations,
+  initialPanels,
+  initialEpisodes = [],
   credits,
   userId,
+  plan,
+  isAdmin = false,
 }: {
   project: ProjectRow;
   initialGenerations: GenerationRow[];
+  /** The project's images from storage (uploads + split panels), newest first. */
+  initialPanels: MangaPanel[];
+  /** Episodes already built for this project, newest first. */
+  initialEpisodes?: EpisodeRow[];
   credits: number;
   userId: string;
+  plan: PlanId;
+  /** Admins can pick a comparison video model (lib/ai/video-models.ts). */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const startPolling = usePolling();
 
-  const [panels, setPanels] = useState<MangaPanel[]>(
-    initialGenerations
-      .map((g) => ({ id: g.id, path: g.source_image_url, url: g.source_image_url, name: "Uploaded panel" }))
-      .filter((p, idx, arr) => arr.findIndex((x) => x.path === p.path) === idx)
-  );
+  const [panels, setPanels] = useState<MangaPanel[]>(initialPanels);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(panels[0]?.id ?? null);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedPanelIds, setSelectedPanelIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [settings, setSettings] = useState<AnimationSettingsValue>(DEFAULT_SETTINGS);
+  const [videoModel, setVideoModel] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL);
   const [generations, setGenerations] = useState<GenerationRow[]>(initialGenerations);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localCredits, setLocalCredits] = useState(credits);
   const [exportsByGeneration, setExportsByGeneration] = useState<Record<string, GenerationExportRow[]>>({});
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({});
+  // A finished render picked from the history; null shows the latest one.
+  const [viewedGenerationId, setViewedGenerationId] = useState<string | null>(null);
 
   const selectedPanel = panels.find((p) => p.id === selectedPanelId) ?? null;
   const latestGeneration = generations[0] ?? null;
   const latestCompleted = generations.find((g) => g.status === "completed") ?? null;
-  const isRendering = latestGeneration && latestGeneration.status !== "completed" && latestGeneration.status !== "failed";
+  const viewedGeneration = generations.find((g) => g.id === viewedGenerationId && g.status === "completed") ?? null;
+  const shownCompleted = viewedGeneration ?? latestCompleted;
+  const renderingGeneration =
+    latestGeneration && latestGeneration.status !== "completed" && latestGeneration.status !== "failed"
+      ? latestGeneration
+      : null;
+
+  // What this tab already knows, so realtime updates only react to actual
+  // transitions — the same row is updated many times (progress, watermark,
+  // 4K, sound) and each update must not re-announce "ready".
+  const generationsRef = useRef(generations);
+  useEffect(() => {
+    generationsRef.current = generations;
+  }, [generations]);
+
+  const refreshCredits = useCallback(async () => {
+    setLocalCredits(await getMyCreditsBalance());
+  }, []);
 
   const handleRealtimeChange = useCallback(
     async (generationId: string) => {
       const generation = await getGeneration(generationId);
       if (!generation) return;
+      const previous = generationsRef.current.find((g) => g.id === generation.id);
 
       setGenerations((prev) => {
         const idx = prev.findIndex((g) => g.id === generation.id);
@@ -113,15 +121,35 @@ export function EditorWorkspace({
         return next;
       });
 
-      if (generation.status === "completed") {
-        toast.success("Your animation is ready!");
-        router.refresh();
-      } else if (generation.status === "failed") {
-        toast.error(generation.error_message ?? "Generation failed. Credits refunded.");
-        setLocalCredits((c) => c + generation.credits_cost);
+      if (generation.status !== previous?.status) {
+        if (generation.status === "completed") {
+          toast.success("Your animation is ready!");
+          router.refresh();
+        } else if (generation.status === "failed") {
+          toast.error(generation.error_message ?? "Generation failed. Credits refunded.");
+          if (previous) setLocalCredits((c) => c + generation.credits_cost);
+        }
+      }
+
+      if (!previous) {
+        // A row this tab hadn't seen (a batch item, or our own render whose
+        // event beat the action's response): its debit happened server-side,
+        // so re-read the balance rather than adjusting a local guess.
+        void refreshCredits();
+        return;
+      }
+      for (const kind of ["upscale", "audio"] as const) {
+        const status = getEnhancementState(generation, kind).status;
+        if (status === getEnhancementState(previous, kind).status) continue;
+        if (status === "completed") {
+          toast.success(ENHANCEMENT_MESSAGES[kind].completed);
+        } else if (status === "failed") {
+          toast.error(ENHANCEMENT_MESSAGES[kind].failed);
+          void refreshCredits();
+        }
       }
     },
-    [router]
+    [router, refreshCredits]
   );
 
   useRealtimeGenerations({ projectId: project.id, onChange: handleRealtimeChange });
@@ -154,10 +182,22 @@ export function EditorWorkspace({
     }
   }
 
-  function handleRemove(id: string) {
+  async function handleRemove(id: string) {
+    const panel = panels.find((p) => p.id === id);
+    if (!panel) return;
+    const { error } = await deletePanel(project.id, panel.path);
+    if (error) {
+      toast.error(error);
+      return;
+    }
     setPanels((prev) => prev.filter((p) => p.id !== id));
     if (selectedPanelId === id) setSelectedPanelId(null);
     setSelectedPanelIds((prev) => prev.filter((p) => p !== id));
+  }
+
+  function handleBatchModeChange(enabled: boolean) {
+    setBatchMode(enabled);
+    setSelectedPanelIds([]);
   }
 
   function handlePanelSelect(id: string) {
@@ -179,6 +219,7 @@ export function EditorWorkspace({
         projectId: project.id,
         sourceImagePath: selectedPanel.path,
         settings,
+        ...(isAdmin ? { modelId: videoModel } : {}),
       });
 
       if (error || !generation) {
@@ -186,8 +227,10 @@ export function EditorWorkspace({
         return;
       }
 
-      setGenerations((prev) => [generation, ...prev]);
-      setLocalCredits((c) => c - generation.credits_cost);
+      // Realtime may already have added this row if its event beat our response.
+      setGenerations((prev) => (prev.some((g) => g.id === generation.id) ? prev : [generation, ...prev]));
+      setViewedGenerationId(null); // follow the new render's progress
+      void refreshCredits();
       toast.info("Render started — this usually takes 30–90 seconds.");
     } finally {
       setIsSubmitting(false);
@@ -205,7 +248,7 @@ export function EditorWorkspace({
       const { data, error } = await startBatchGeneration({
         projectId: project.id,
         sourceImagePaths: paths,
-        settings: { ...settings, removeText: settings.removeText },
+        settings,
       });
 
       if (error || !data) {
@@ -231,14 +274,16 @@ export function EditorWorkspace({
       const { data, error } = await requestPanelExtraction(project.id, selectedPanel.path);
       if (error || !data) {
         toast.error(error ?? "Could not queue panel extraction.");
+        setIsExtracting(false);
         return;
       }
+      setLocalCredits(data.creditsBalance);
 
-      const poll = setInterval(async () => {
+      startPolling(async (stop) => {
         const result = await getPanelExtractionResult(data.panelExtractionId);
         if (!result) return;
         if (result.status === "completed") {
-          clearInterval(poll);
+          stop();
           setIsExtracting(false);
           const newPanels = result.panels.map((p) => ({
             id: crypto.randomUUID(),
@@ -249,320 +294,145 @@ export function EditorWorkspace({
           setPanels((prev) => [...newPanels, ...prev]);
           toast.success(`Split into ${newPanels.length} panels.`);
         } else if (result.status === "failed") {
-          clearInterval(poll);
+          stop();
           setIsExtracting(false);
           toast.error(result.errorMessage ?? "Panel extraction failed.");
         }
-      }, 4000);
+      }, {
+        intervalMs: POLL_INTERVAL_MS,
+        timeoutMs: POLL_TIMEOUT_MS,
+        onTimeout: () => {
+          setIsExtracting(false);
+          toast.warning("Splitting this page is taking longer than expected. Please try again later.");
+        },
+      });
     } catch {
       setIsExtracting(false);
     }
   }
 
-  async function handleUpscale(generationId: string) {
-    setPendingActions((p) => ({ ...p, [`upscale-${generationId}`]: true }));
-    const { error } = await requestUpscale(generationId);
-    if (error) toast.error(error);
-    else toast.info("4K upscale queued.");
-  }
-
-  async function handleAudio(generationId: string) {
-    setPendingActions((p) => ({ ...p, [`audio-${generationId}`]: true }));
-    const { error } = await requestAudio(generationId);
-    if (error) toast.error(error);
-    else toast.info("AI sound design queued.");
+  async function handleEnhancement(kind: EnhancementKind, generationId: string) {
+    const key = `${kind}-${generationId}`;
+    setPendingActions((p) => ({ ...p, [key]: true }));
+    const { data, error } = await (kind === "upscale" ? requestUpscale : requestAudio)(generationId);
+    setPendingActions((p) => ({ ...p, [key]: false }));
+    if (error || !data) {
+      toast.error(error ?? "Could not start this job.");
+      return;
+    }
+    setLocalCredits(data.creditsBalance);
+    // Mirror the server-side claim now so the button stays disabled; realtime
+    // then reports completion (button hidden) or failure (button back).
+    const patch = enhancementPatch(kind, "processing", new Date().toISOString());
+    setGenerations((prev) => prev.map((g) => (g.id === generationId ? { ...g, ...patch } : g)));
+    toast.info(ENHANCEMENT_MESSAGES[kind].queued);
   }
 
   async function handleExport(generationId: string, ratio: ExportRatio) {
     const key = `export-${generationId}-${ratio}`;
     setPendingActions((p) => ({ ...p, [key]: true }));
-    const { error } = await requestExportRatio(generationId, ratio);
-    if (error) {
-      toast.error(error);
+    const { data, error } = await requestExportRatio(generationId, ratio);
+    if (error || !data) {
+      toast.error(error ?? "Could not queue export.");
       setPendingActions((p) => ({ ...p, [key]: false }));
       return;
     }
+    setLocalCredits(data.creditsBalance);
     toast.info(`${RATIO_LABEL[ratio]} export queued.`);
 
-    const poll = setInterval(async () => {
+    startPolling(async (stop) => {
       const rows = await getGenerationExports(generationId);
       setExportsByGeneration((prev) => ({ ...prev, [generationId]: rows }));
       const row = rows.find((r) => r.ratio === ratio);
       if (row?.status === "completed" || row?.status === "failed") {
-        clearInterval(poll);
+        stop();
         setPendingActions((p) => ({ ...p, [key]: false }));
       }
-    }, 4000);
+    }, {
+      intervalMs: POLL_INTERVAL_MS,
+      timeoutMs: POLL_TIMEOUT_MS,
+      onTimeout: () => {
+        setPendingActions((p) => ({ ...p, [key]: false }));
+        toast.warning(`The ${RATIO_LABEL[ratio]} export is taking longer than expected. Reload the page later to download it.`);
+      },
+    });
   }
 
-  const latestCompletedId = latestCompleted?.id;
+  const shownCompletedId = shownCompleted?.id;
   useEffect(() => {
-    if (latestCompletedId) {
-      getGenerationExports(latestCompletedId).then((rows) =>
-        setExportsByGeneration((prev) => ({ ...prev, [latestCompletedId]: rows }))
+    if (shownCompletedId) {
+      getGenerationExports(shownCompletedId).then((rows) =>
+        setExportsByGeneration((prev) => ({ ...prev, [shownCompletedId]: rows }))
       );
     }
-  }, [latestCompletedId]);
-
-  const progressValue = latestGeneration?.progress ?? 0;
+  }, [shownCompletedId]);
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-8 px-6 py-8 lg:grid-cols-[1fr_380px]">
+    <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{project.title}</h1>
-            <Badge variant="secondary" className="mt-1 capitalize">
-              {project.status}
-            </Badge>
-          </div>
-          <Badge variant="outline" className="gap-1.5">
-            <Coins className="size-3.5 text-primary" />
-            {localCredits.toLocaleString()} credits
-          </Badge>
-        </div>
+        <EditorHeader project={project} credits={localCredits} />
 
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">1. Import manga panels</CardTitle>
-            <div className="flex items-center gap-4">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!selectedPanel || isExtracting || batchMode}
-                onClick={handleExtractPanels}
-              >
-                {isExtracting ? <Loader2 className="size-4 animate-spin" /> : <Scissors className="size-4" />}
-                Split page into panels
-              </Button>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="batch-mode" className="text-xs text-muted-foreground">
-                  Batch mode
-                </Label>
-                <Switch
-                  id="batch-mode"
-                  checked={batchMode}
-                  onCheckedChange={(v) => {
-                    setBatchMode(v);
-                    setSelectedPanelIds([]);
-                  }}
-                />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <MangaUploader
-              panels={panels}
-              selectedId={selectedPanelId}
-              selectedIds={selectedPanelIds}
-              multiSelect={batchMode}
-              onSelect={handlePanelSelect}
-              onUpload={handleUpload}
-              onRemove={handleRemove}
-              isUploading={isUploading}
-            />
-            {batchMode && (
-              <div className="mt-4 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
-                <span className="flex items-center gap-2 text-sm">
-                  <Layers className="size-4 text-primary" />
-                  {selectedPanelIds.length} panel{selectedPanelIds.length === 1 ? "" : "s"} selected for a whole-chapter batch render
-                </span>
-                <Button size="sm" variant="brand" disabled={isSubmitting} onClick={handleBatchGenerate}>
-                  {isSubmitting && <Loader2 className="size-4 animate-spin" />}
-                  Generate batch
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <PanelImportCard
+          panels={panels}
+          selectedPanelId={selectedPanelId}
+          selectedPanelIds={selectedPanelIds}
+          hasSelectedPanel={!!selectedPanel}
+          batchMode={batchMode}
+          canBatch={planAllows(plan, "batch")}
+          isUploading={isUploading}
+          isExtracting={isExtracting}
+          isSubmitting={isSubmitting}
+          onBatchModeChange={handleBatchModeChange}
+          onExtractPanels={handleExtractPanels}
+          onSelectPanel={handlePanelSelect}
+          onUpload={handleUpload}
+          onRemovePanel={handleRemove}
+          onBatchGenerate={handleBatchGenerate}
+        />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">2. Preview</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {isRendering ? (
-              <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/10 p-6 text-center">
-                <Loader2 className="mx-auto size-6 animate-spin text-primary" />
-                <p className="text-sm font-medium">{STATUS_LABEL[latestGeneration!.status]}</p>
-                <Progress value={progressValue} />
-              </div>
-            ) : latestCompleted?.output_video_url ? (
-              <>
-                <VideoPlayer
-                  src={latestCompleted.output_video_url}
-                  poster={latestCompleted.thumbnail_url}
-                  downloadFileName={`${project.title.replace(/\s+/g, "-").toLowerCase()}.mp4`}
-                />
-                <GenerationActions
-                  generation={latestCompleted}
-                  exports={exportsByGeneration[latestCompleted.id] ?? []}
-                  pendingActions={pendingActions}
-                  onUpscale={() => handleUpscale(latestCompleted.id)}
-                  onAudio={() => handleAudio(latestCompleted.id)}
-                  onExport={(ratio) => handleExport(latestCompleted.id, ratio)}
-                />
-              </>
-            ) : selectedPanel ? (
-              <div className="overflow-hidden rounded-xl border border-border/60">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={selectedPanel.url} alt="Selected panel" className="w-full object-contain" />
-              </div>
-            ) : (
-              <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-border/60 text-muted-foreground">
-                <Clapperboard className="size-8" />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <PreviewCard
+          projectTitle={project.title}
+          renderingGeneration={viewedGeneration ? null : renderingGeneration}
+          latestCompleted={shownCompleted}
+          latestCompletedExports={shownCompleted ? exportsByGeneration[shownCompleted.id] ?? [] : []}
+          viewingOlder={viewedGeneration !== null && viewedGeneration.id !== latestCompleted?.id}
+          onShowLatest={() => setViewedGenerationId(null)}
+          selectedPanel={selectedPanel}
+          pendingActions={pendingActions}
+          onUpscale={(generationId) => handleEnhancement("upscale", generationId)}
+          onAudio={(generationId) => handleEnhancement("audio", generationId)}
+          onExport={handleExport}
+          canUpscale={planAllows(plan, "upscale")}
+        />
 
         {generations.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Render history</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {generations.map((g) => (
-                <div key={g.id}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      {new Date(g.created_at).toLocaleString()} · {g.camera_movement.replace("_", " ")}
-                      {g.batch_id && " · batch"}
-                    </span>
-                    <Badge
-                      variant={
-                        g.status === "completed"
-                          ? "success"
-                          : g.status === "failed"
-                          ? "destructive"
-                          : "warning"
-                      }
-                    >
-                      {STATUS_LABEL[g.status]}
-                    </Badge>
-                  </div>
-                  <Separator className="mt-3" />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <RenderHistoryCard
+            generations={generations}
+            viewedId={renderingGeneration && !viewedGeneration ? null : shownCompleted?.id ?? null}
+            onView={setViewedGenerationId}
+            showModel={isAdmin}
+          />
         )}
+
+        <EpisodeCard
+          projectId={project.id}
+          projectTitle={project.title}
+          renders={generations.filter((g) => g.status === "completed")}
+          initialEpisodes={initialEpisodes}
+        />
       </div>
 
       <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">3. Animation settings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AnimationSettings value={settings} onChange={setSettings} disabled={isSubmitting} />
-          </CardContent>
-        </Card>
-
-        {!batchMode && (
-          <Button
-            size="lg"
-            variant="brand"
-            className="w-full"
-            disabled={!selectedPanel || isSubmitting}
-            onClick={handleGenerate}
-          >
-            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            Generate animation
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GenerationActions({
-  generation,
-  exports,
-  pendingActions,
-  onUpscale,
-  onAudio,
-  onExport,
-}: {
-  generation: GenerationRow;
-  exports: GenerationExportRow[];
-  pendingActions: Record<string, boolean>;
-  onUpscale: () => void;
-  onAudio: () => void;
-  onExport: (ratio: ExportRatio) => void;
-}) {
-  return (
-    <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/10 p-4">
-      <div className="flex flex-wrap gap-2">
-        {generation.resolution !== "4k" && !generation.upscaled_video_url && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pendingActions[`upscale-${generation.id}`]}
-            onClick={onUpscale}
-          >
-            {pendingActions[`upscale-${generation.id}`] ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Wand2 className="size-4" />
-            )}
-            Upscale to 4K
-          </Button>
-        )}
-        {!generation.audio_url && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pendingActions[`audio-${generation.id}`]}
-            onClick={onAudio}
-          >
-            {pendingActions[`audio-${generation.id}`] ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Volume2 className="size-4" />
-            )}
-            Add AI sound
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Export for other channels</p>
-        <div className="flex flex-wrap gap-2">
-          {EXPORT_RATIOS.map((ratio) => {
-            const existing = exports.find((e) => e.ratio === ratio);
-            const key = `export-${generation.id}-${ratio}`;
-            const isPending = pendingActions[key] || existing?.status === "pending" || existing?.status === "processing";
-
-            if (existing?.status === "completed" && existing.video_url) {
-              return (
-                <a key={ratio} href={existing.video_url} download target="_blank" rel="noreferrer">
-                  <Button type="button" size="sm" variant="secondary">
-                    <Download className="size-4" />
-                    {RATIO_LABEL[ratio]}
-                  </Button>
-                </a>
-              );
-            }
-
-            return (
-              <Button
-                key={ratio}
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={isPending}
-                onClick={() => onExport(ratio)}
-              >
-                {isPending && <Loader2 className="size-4 animate-spin" />}
-                {RATIO_LABEL[ratio]}
-              </Button>
-            );
-          })}
-        </div>
+        <SettingsPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          batchMode={batchMode}
+          hasSelectedPanel={!!selectedPanel}
+          isSubmitting={isSubmitting}
+          onGenerate={handleGenerate}
+          plan={plan}
+          modelPicker={isAdmin ? { value: videoModel, onChange: setVideoModel } : undefined}
+        />
       </div>
     </div>
   );

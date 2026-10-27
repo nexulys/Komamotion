@@ -2,8 +2,9 @@ import { logger, task } from "@trigger.dev/sdk";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { calculateCreditsCost } from "@/lib/stripe/credits";
 import { getDefaultProvider } from "@/lib/ai";
+import { DEFAULT_VIDEO_MODEL } from "@/lib/ai/video-models";
 import { estimateGenerationCostUsd } from "@/lib/ai/costs";
-import { deductCredits, refundCredits } from "@/lib/generation/pipeline";
+import { deductCredits, finalizeGenerationFailed, refundCredits } from "@/lib/generation/pipeline";
 import type { CameraMovement, Resolution } from "@/lib/supabase/types";
 import { generateVideoTask } from "@/trigger/generate-video";
 
@@ -35,6 +36,8 @@ export const batchGenerateTask = task({
     userId: string;
     sourceImagePaths: string[];
     settings: BatchGenerateSettings;
+    /** Trigger.dev priority for the renders, from the user's plan. */
+    priority?: number;
   }) => {
     const admin = createServiceRoleClient();
     const provider = getDefaultProvider();
@@ -78,6 +81,7 @@ export const batchGenerateTask = task({
           source_image_url: sourceImagePath,
           status: "pending",
           provider,
+          model: DEFAULT_VIDEO_MODEL,
           prompt: payload.settings.prompt || null,
           camera_movement: payload.settings.cameraMovement,
           motion_intensity: payload.settings.motionIntensity,
@@ -107,7 +111,18 @@ export const batchGenerateTask = task({
     }
 
     if (createdIds.length > 0) {
-      await generateVideoTask.batchTrigger(createdIds.map((generationId) => ({ payload: { generationId } })));
+      try {
+        await generateVideoTask.batchTrigger(
+          createdIds.map((generationId) => ({ payload: { generationId }, options: { priority: payload.priority ?? 0 } }))
+        );
+      } catch (err) {
+        // The rows are debited but will never render: fail + refund each one now.
+        logger.error("Could not queue batch renders", { batchId: payload.batchId, error: err instanceof Error ? err.message : String(err) });
+        for (const id of createdIds) {
+          await finalizeGenerationFailed(id, "The batch render could not be started. Your credits were refunded.", admin);
+        }
+        return { queued: 0, requested: payload.sourceImagePaths.length };
+      }
       await admin.from("projects").update({ status: "processing" }).eq("id", payload.projectId);
     }
 

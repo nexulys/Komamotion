@@ -36,12 +36,19 @@ export async function deleteProject(projectId: string) {
     .eq("project_id", projectId)
     .eq("user_id", authUserId);
 
+  const { data: episodes } = await admin
+    .from("episodes")
+    .select("output_video_url, thumbnail_url")
+    .eq("project_id", projectId)
+    .eq("user_id", authUserId);
+
   const sourcePaths = (generations ?? [])
     .map((g) => g.source_image_url)
     .filter((p): p is string => p != null && !p.startsWith("http"));
-  const renderedPaths = (generations ?? [])
-    .flatMap((g) => [g.output_video_url, g.thumbnail_url, g.upscaled_video_url, g.audio_url])
-    .filter((p): p is string => p != null && !p.startsWith("http"));
+  const renderedPaths = [
+    ...(generations ?? []).flatMap((g) => [g.output_video_url, g.thumbnail_url, g.upscaled_video_url, g.audio_url]),
+    ...(episodes ?? []).flatMap((e) => [e.output_video_url, e.thumbnail_url]),
+  ].filter((p): p is string => p != null && !p.startsWith("http"));
 
   const { error } = await admin
     .from("projects")
