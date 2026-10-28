@@ -26,6 +26,7 @@ export function PreviewCard({
   onAudio,
   onExport,
   canUpscale,
+  canAddAudio,
 }: {
   projectTitle: string;
   renderingGeneration: GenerationRow | null;
@@ -40,6 +41,7 @@ export function PreviewCard({
   onAudio: (generationId: string) => void;
   onExport: (generationId: string, ratio: ExportRatio) => void;
   canUpscale: boolean;
+  canAddAudio: boolean;
 }) {
   return (
     <Card>
@@ -74,6 +76,7 @@ export function PreviewCard({
               onAudio={() => onAudio(latestCompleted.id)}
               onExport={(ratio) => onExport(latestCompleted.id, ratio)}
               canUpscale={canUpscale}
+              canAddAudio={canAddAudio}
             />
           </>
         ) : selectedPanel ? (

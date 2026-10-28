@@ -15,6 +15,7 @@ export function GenerationActions({
   onAudio,
   onExport,
   canUpscale,
+  canAddAudio,
 }: {
   generation: GenerationRow;
   exports: GenerationExportRow[];
@@ -24,6 +25,8 @@ export function GenerationActions({
   onExport: (ratio: ExportRatio) => void;
   /** 4K upscaling is a Studio+ feature; other plans get an upgrade link instead. */
   canUpscale: boolean;
+  /** Hidden until the server has an ElevenLabs key. */
+  canAddAudio: boolean;
 }) {
   // Busy while the click is in flight, then while the job runs server-side (survives reloads).
   const upscaleBusy = pendingActions[`upscale-${generation.id}`] || isEnhancementRunning(generation, "upscale");
@@ -56,7 +59,7 @@ export function GenerationActions({
             Upscale to 4K
           </Button>
         )}
-        {!generation.audio_url && (
+        {!generation.audio_url && canAddAudio && (
           <Button
             type="button"
             size="sm"

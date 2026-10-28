@@ -6,6 +6,7 @@ import { getGenerationById, requireCurrentUser } from "@/lib/supabase/queries";
 import { deleteFromStorage, resolveMediaUrl, MANGA_SOURCES_BUCKET, RENDERED_VIDEOS_BUCKET } from "@/lib/supabase/signed-url";
 import { getDefaultProvider, getVideoGenerationStatus } from "@/lib/ai";
 import { estimateGenerationCostUsd } from "@/lib/ai/costs";
+import { isAudioConfigured } from "@/lib/ai/audio";
 import {
   calculateAudioCreditsCost,
   calculateCreditsCost,
@@ -254,6 +255,7 @@ async function requestEnhancement(
   const config = ENHANCEMENTS[kind];
   const { authUserId, profile } = await requireCurrentUser();
   if (kind === "upscale" && !planAllows(profile?.plan, "upscale")) return { error: upgradeMessage("upscale") };
+  if (kind === "audio" && !isAudioConfigured()) return { error: "AI sound isn't available yet." };
   try {
     await enforceRateLimit("aiUtility", authUserId);
   } catch (err) {

@@ -52,6 +52,7 @@ export function EditorWorkspace({
   userId,
   plan,
   isAdmin = false,
+  audioAvailable = false,
 }: {
   project: ProjectRow;
   initialGenerations: GenerationRow[];
@@ -64,6 +65,8 @@ export function EditorWorkspace({
   plan: PlanId;
   /** Admins can pick a comparison video model (lib/ai/video-models.ts). */
   isAdmin?: boolean;
+  /** "Add AI sound" needs an ElevenLabs key on the server. */
+  audioAvailable?: boolean;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -403,6 +406,7 @@ export function EditorWorkspace({
           onAudio={(generationId) => handleEnhancement("audio", generationId)}
           onExport={handleExport}
           canUpscale={planAllows(plan, "upscale")}
+          canAddAudio={audioAvailable}
         />
 
         {generations.length > 0 && (
