@@ -122,7 +122,10 @@ const balance = () => (h.db.tables.users[0] as { credits_balance: number }).cred
 const gen = (id = "g1") => h.db.tables.generations.find((g) => g.id === id)!;
 const ledger = () => h.db.tables.credit_transactions.map((t) => [t.type, t.amount]);
 
-beforeEach(() => seed());
+beforeEach(() => {
+  seed();
+  vi.stubEnv("ELEVENLABS_API_KEY", "test-elevenlabs-key");
+});
 
 // ---- renders ----------------------------------------------------------------
 describe("startGeneration", () => {
@@ -353,6 +356,15 @@ describe("requestUpscale / requestAudio", () => {
     const r = await actions.requestAudio("g1");
     expect(r.data?.creditsBalance).toBe(50 - AUDIO_COST);
     expect([gen().audio_status, gen().upscale_status]).toEqual(["processing", "processing"]);
+  });
+
+  it("doesn't offer sound, or charge for it, without an ElevenLabs key", async () => {
+    vi.stubEnv("ELEVENLABS_API_KEY", "");
+    const r = await actions.requestAudio("g1");
+    expect(r.error).toBe("AI sound isn't available yet.");
+    expect(balance()).toBe(50);
+    expect(writes(h.db)).toEqual([]);
+    expect(h.triggered).toEqual([]);
   });
 
   it("failEnhancement refunds before flagging failed", async () => {

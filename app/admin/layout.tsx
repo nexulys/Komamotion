@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, ShieldAlert, Users, Film } from "lucide-react";
+import { ClipboardCheck, LayoutDashboard, ShieldAlert, Users, Film } from "lucide-react";
 import { requireAdmin } from "@/lib/admin/queries";
 import { Logo } from "@/components/branding/logo";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/generations", label: "Generations", icon: Film },
+  { href: "/admin/setup", label: "Setup", icon: ClipboardCheck },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

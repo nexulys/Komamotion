@@ -1,5 +1,10 @@
 const ELEVENLABS_SOUND_GENERATION_URL = "https://api.elevenlabs.io/v1/sound-generation";
 
+/** "Add AI sound" is offered only once an ElevenLabs key is configured. */
+export function isAudioConfigured() {
+  return Boolean(process.env.ELEVENLABS_API_KEY?.trim());
+}
+
 /**
  * Generates an ambient sound bed / SFX clip matching the scene via
  * ElevenLabs' sound-generation API. Returns raw MP3 bytes — the caller

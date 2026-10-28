@@ -7,6 +7,7 @@ import {
   getProjectPanels,
 } from "@/lib/supabase/queries";
 import { EditorWorkspace } from "@/components/editor-workspace";
+import { isAudioConfigured } from "@/lib/ai/audio";
 
 export default async function EditorPage({
   params,
@@ -40,6 +41,7 @@ export default async function EditorPage({
       userId={authUserId}
       plan={profile?.plan ?? "free"}
       isAdmin={profile?.is_admin ?? false}
+      audioAvailable={isAudioConfigured()}
     />
   );
 }
