@@ -4,6 +4,12 @@ Tout ce qu'il reste à configurer **hors du code** pour que le site fonctionne
 de bout en bout. Les étapes sont dans l'ordre : chacune débloque la suivante.
 Tout se fait depuis un navigateur (téléphone compris).
 
+> **La page Admin → Setup** (`/admin/setup`) vérifie tout ce guide en direct : migrations,
+> clés, déploiement Trigger.dev, prix Stripe, webhook, crédit fal.ai, mentions légales… Elle
+> dit ce qui manque, dans l'ordre, et propose deux boutons qui font une partie du travail
+> à ta place (Trigger.dev §4, Stripe §5). Pour l'ouvrir il faut être admin : fais d'abord
+> l'étape 2.4 (une ligne SQL), puis reviens-y après chaque étape (bouton **Revérifier**).
+
 > **Règle Vercel** : les variables qui commencent par `NEXT_PUBLIC_` doivent
 > être de type **Config** (Vercel refuse le type Secret pour elles). Toutes les
 > autres : type **Secret**. Après chaque ajout de variables, **redéployer**
@@ -20,9 +26,8 @@ Tout se fait depuis un navigateur (téléphone compris).
 
 ## 1. Fusionner le code
 
-1. GitHub → Pull requests → la PR « KomaMotion production readiness » (#3).
-2. Attendre que la vérification **CI** soit verte, puis **Merge pull request**.
-3. Vercel redéploie automatiquement `main`.
+Fait (PR #3 fusionnée). À chaque nouvelle PR : attendre la vérification **CI** verte, puis
+**Merge pull request** ; Vercel redéploie `main` tout seul.
 
 ## 2. Supabase
 
@@ -83,8 +88,12 @@ Sans Trigger.dev, aucun rendu, export, découpage, filigrane, 4K ni son ne s'ex�
 2. **Vercel** → variables :
    - `TRIGGER_PROJECT_REF` = `proj_…`
    - `TRIGGER_SECRET_KEY` = la clé **Production** (`tr_prod_…`, page API keys du projet)
-3. **Trigger.dev** → Environment variables → environnement **Production** → ajouter
-   (les tâches tournent chez Trigger.dev, pas chez Vercel) :
+3. Les tâches tournent chez Trigger.dev, pas chez Vercel : elles ont besoin de leur propre copie
+   de certaines variables. **Le plus simple** : une fois `TRIGGER_PROJECT_REF` et `TRIGGER_SECRET_KEY`
+   dans Vercel (et redéployé), **Admin → Setup** → carte Trigger.dev → **Copier de Vercel vers
+   Trigger.dev**. À refaire après chaque changement de clé dans Vercel.
+
+   À la main sinon : **Trigger.dev** → Environment variables → environnement **Production** → ajouter :
 
    | Variable | Valeur |
    |---|---|
@@ -107,6 +116,13 @@ Sans Trigger.dev, aucun rendu, export, découpage, filigrane, 4K ni son ne s'ex�
 ## 5. Stripe (paiements)
 
 Commencer en **mode test** (clés `sk_test_…`), tout vérifier, puis refaire en mode live.
+
+**Le plus simple** : mettre `STRIPE_SECRET_KEY` dans Vercel, redéployer, puis **Admin → Setup** →
+carte Stripe → **Créer dans Stripe**. Les 4 prix et le webhook (avec les bons événements) sont
+créés, et la page affiche les 5 valeurs à coller dans Vercel (`STRIPE_PRICE_…` et
+`STRIPE_WEBHOOK_SECRET`). Restent à faire à la main : points 4 à 6 ci-dessous.
+
+À la main sinon :
 
 1. **Produits** (Product catalog → Add product), prix en **USD** :
    - Starter — 19 $ / mois (récurrent)
@@ -136,7 +152,8 @@ Sans eux, n'importe qui peut envoyer un nombre illimité de requêtes.
 
 ## 7. (Optionnel) ElevenLabs — option « Add AI sound »
 
-elevenlabs.io → API keys → `ELEVENLABS_API_KEY` dans Vercel et Trigger.dev.
+elevenlabs.io → API keys → `ELEVENLABS_API_KEY` dans Vercel et Trigger.dev (le bouton de
+l'étape 4.3 la recopie). Tant qu'elle manque, le bouton « Add AI sound » est masqué.
 
 ## 8. Informations légales (obligatoires pour vendre en France)
 
